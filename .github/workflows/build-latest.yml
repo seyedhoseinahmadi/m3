@@ -1,0 +1,132 @@
+name: Build Hozoor Customer Latest
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: "Hozoor Server URL"
+        required: false
+        default: ""
+      server_id:
+        description: "Server ID"
+        required: false
+        default: "HOZOOR_MAIN"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hozoor-customer-latest
+  cancel-in-progress: true
+
+jobs:
+  build-windows-setup:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read app version
+        shell: pwsh
+        run: |
+          if (Test-Path "VERSION.txt") {
+            $version = (Get-Content "VERSION.txt" -Raw).Trim()
+          } else {
+            $version = "latest"
+          }
+          "HOZOOR_APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python requirements
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Resolve build variables
+        shell: pwsh
+        run: |
+          $serverUrl = "${{ github.event.inputs.server_url }}"
+          if ([string]::IsNullOrWhiteSpace($serverUrl)) {
+            $serverUrl = "${{ secrets.HOZOOR_SERVER_URL }}"
+          }
+          if ([string]::IsNullOrWhiteSpace($serverUrl)) {
+            $serverUrl = "${{ vars.HOZOOR_SERVER_URL }}"
+          }
+          if ([string]::IsNullOrWhiteSpace($serverUrl)) {
+            Write-Error "Server URL is empty. Set Repository Variable or Secret HOZOOR_SERVER_URL, or run workflow manually with server_url."
+            exit 1
+          }
+
+          $serverId = "${{ github.event.inputs.server_id }}"
+          if ([string]::IsNullOrWhiteSpace($serverId)) {
+            $serverId = "${{ vars.HOZOOR_SERVER_ID }}"
+          }
+          if ([string]::IsNullOrWhiteSpace($serverId)) {
+            $serverId = "HOZOOR_MAIN"
+          }
+
+          "HOZOOR_SERVER_URL=$serverUrl" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "HOZOOR_SERVER_ID=$serverId" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Generate server-bound build config
+        shell: pwsh
+        env:
+          HOZOOR_SERVER_URL: ${{ env.HOZOOR_SERVER_URL }}
+          HOZOOR_SERVER_ID: ${{ env.HOZOOR_SERVER_ID }}
+          HOZOOR_AGENT_TOKEN: ${{ secrets.HOZOOR_AGENT_TOKEN }}
+        run: |
+          python make_build_config.py --non-interactive
+
+      - name: Build EXE
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name HozoorSyncCustomer hozoor_customer_app.py
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Build Setup Installer
+        shell: pwsh
+        env:
+          HOZOOR_APP_VERSION: ${{ env.HOZOOR_APP_VERSION }}
+        run: |
+          New-Item -ItemType Directory -Force -Path Output
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "installer\HozoorSyncCustomer.iss"
+
+      - name: Prepare release file
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path Release
+          Copy-Item "Output\HozoorSyncCustomer_Setup.exe" "Release\HozoorSyncCustomer_Setup.exe" -Force
+
+      - name: Publish latest release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: hozoor-customer-latest
+          name: Hozoor Customer Latest Build
+          body: |
+            Automatic Hozoor Customer Windows Setup build.
+
+            Version: ${{ env.HOZOOR_APP_VERSION }}
+            Commit: ${{ github.sha }}
+            Server ID: ${{ env.HOZOOR_SERVER_ID }}
+
+            This release is updated automatically on every push to main/master.
+          artifacts: "Release/HozoorSyncCustomer_Setup.exe"
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          artifactErrorsFailBuild: true
+          makeLatest: true
