@@ -1,0 +1,17 @@
+{
+  "auto_start_sync": true,
+  "read_interval_seconds": 20,
+  "sync_interval_seconds": 20,
+  "heartbeat_interval_seconds": 120,
+  "restore_interval_seconds": 180,
+  "command_interval_seconds": 15,
+  "serial_timeout_seconds": 3,
+  "max_batch_size": 100,
+  "preferred_port": "",
+  "events_endpoint": "/api/hozoor/events/batch",
+  "heartbeat_endpoint": "/api/hozoor/agent/heartbeat",
+  "pull_commands_endpoint": "/api/hozoor/agent/pull-commands",
+  "command_result_endpoint": "/api/hozoor/agent/command-result",
+  "restore_events_endpoint": "/api/hozoor/agent/restore-events",
+  "restore_confirm_endpoint": "/api/hozoor/agent/restore-confirm"
+}
