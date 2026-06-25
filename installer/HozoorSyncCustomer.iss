@@ -1,11 +1,14 @@
 #define MyAppName "Hozoor Sync"
-#define MyAppVersion "0.2.5"
+#define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
+#if MyAppVersion == ""
+#define MyAppVersion "0.2.7"
+#endif
 #define MyAppPublisher "Avaye Farda Media"
 #define MyAppURL "https://avayefardamedia.com"
 #define MyAppExeName "HozoorSyncCustomer.exe"
 
 [Setup]
-AppId={{B5B49748-7D5A-4E75-91F2-HOZOOR024}}
+AppId={{B5B49748-7D5A-4E75-91F2-202600000247}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -16,7 +19,7 @@ DefaultDirName={autopf}\Avaye Farda\Hozoor Sync
 DefaultGroupName=Avaye Farda\Hozoor Sync
 DisableProgramGroupPage=yes
 OutputDir=..\Output
-OutputBaseFilename=HozoorSyncCustomer_Setup_v0_2_5
+OutputBaseFilename=HozoorSyncCustomer_Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -40,6 +43,8 @@ Source: "..\README_INSTALLER_FA.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README_MARKET_PRODUCT_FA.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\UI_FINAL_GUIDE_FA.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\customer_settings.example.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\VERSION.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\fonts\*"; DestDir: "{app}\assets\fonts"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\Hozoor Sync"; Filename: "{app}\{#MyAppExeName}"

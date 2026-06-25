@@ -13,6 +13,7 @@ Rules:
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
@@ -41,11 +42,12 @@ except Exception:
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+from tkinter import font as tkfont
 
 try:
     from hozoor_customer_build_config import APP_VERSION, APP_NAME, SERVER_URL, SERVER_ID, AGENT_TOKEN, BUILD_CHANNEL
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.2.5-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.2.7-DEV"
     APP_NAME = "Hozoor Sync"
     SERVER_URL = "https://YOUR-HOZOOR-SERVER.example.com"
     SERVER_ID = "HOZOOR_MAIN"
@@ -53,6 +55,41 @@ except Exception:
     BUILD_CHANNEL = "dev"
 
 BAUDRATE = 9600
+
+# Avaye Farda UI tokens
+COLOR_BG = "#F5F6F8"
+COLOR_CARD = "#FFFFFF"
+COLOR_TEXT = "#191C1F"
+COLOR_MUTED = "#6B7280"
+COLOR_LINE = "#E5E7EB"
+COLOR_RED = "#B30000"
+COLOR_RED_DARK = "#850000"
+COLOR_DARK = "#191C1F"
+
+def resource_path(relative: str) -> Path:
+    if hasattr(sys, "_MEIPASS"):
+        return Path(getattr(sys, "_MEIPASS")) / relative
+    return Path(__file__).resolve().parent / relative
+
+def load_private_windows_font(font_path: Path) -> bool:
+    try:
+        if os.name != "nt" or not font_path.exists():
+            return False
+        FR_PRIVATE = 0x10
+        return bool(ctypes.windll.gdi32.AddFontResourceExW(str(font_path), FR_PRIVATE, 0))
+    except Exception:
+        return False
+
+def choose_ui_font(root: tk.Tk) -> str:
+    # Tkinter cannot reliably use WOFF/WOFF2 directly. Use TTF if product build includes it.
+    for fname in ["assets/fonts/AFYRegular.ttf", "assets/fonts/AFYBold.ttf"]:
+        load_private_windows_font(resource_path(fname))
+    available = set(tkfont.families(root))
+    for fam in ["AFY", "AFYRegular", "AFY Regular", "AvayeFarda", "Tahoma", "Segoe UI"]:
+        if fam in available:
+            return fam
+    return "Tahoma"
+
 DEFAULT_SETTINGS = {
     "auto_start_sync": True,
     "read_interval_seconds": 20,
@@ -676,16 +713,20 @@ class Engine:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title(f"{APP_NAME} - {APP_VERSION}")
-        self.geometry("980x640")
-        self.minsize(860, 560)
+        self.font_family = choose_ui_font(self)
+        self.title("حضور | Hozoor Sync")
+        self.geometry("1040x680")
+        self.minsize(920, 600)
+        self.configure(bg=COLOR_BG)
 
         self.db = LocalDB(DB_PATH)
         self.uiq = queue.Queue()
         self.engine = Engine(self.db, self.uiq)
 
         self.status_var = tk.StringVar(value="آماده")
-        self.devices_var = tk.StringVar(value="0")
+        self.device_state_var = tk.StringVar(value="متصل نیست")
+        self.device_code_var = tk.StringVar(value="-")
+        self.port_var = tk.StringVar(value="-")
         self.unsynced_var = tk.StringVar(value="0")
         self.server_var = tk.StringVar(value="نامشخص")
         self.last_sync_var = tk.StringVar(value="-")
@@ -705,123 +746,141 @@ class App(tk.Tk):
             ttk.Style(self).theme_use("clam")
         except Exception:
             pass
-        self.option_add("*Font", ("Tahoma", 10))
+        family = self.font_family
+        self.option_add("*Font", (family, 10))
         s = ttk.Style(self)
-        s.configure("TFrame", background="#f6f7f9")
-        s.configure("Card.TFrame", background="#ffffff")
-        s.configure("TLabel", background="#f6f7f9", foreground="#1f2937")
-        s.configure("Card.TLabel", background="#ffffff", foreground="#1f2937")
-        s.configure("Title.TLabel", font=("Tahoma", 16, "bold"), background="#f6f7f9")
-        s.configure("Metric.TLabel", font=("Tahoma", 18, "bold"), background="#ffffff")
-        s.configure("TButton", padding=8)
-        s.configure("TNotebook.Tab", padding=(18, 8))
+        s.configure(".", font=(family, 10), background=COLOR_BG, foreground=COLOR_TEXT)
+        s.configure("TFrame", background=COLOR_BG)
+        s.configure("Top.TFrame", background=COLOR_DARK)
+        s.configure("Card.TFrame", background=COLOR_CARD, relief="flat", borderwidth=0)
+        s.configure("TLabel", background=COLOR_BG, foreground=COLOR_TEXT)
+        s.configure("Top.TLabel", background=COLOR_DARK, foreground="#FFFFFF")
+        s.configure("Muted.TLabel", background=COLOR_BG, foreground=COLOR_MUTED)
+        s.configure("Card.TLabel", background=COLOR_CARD, foreground=COLOR_TEXT)
+        s.configure("CardMuted.TLabel", background=COLOR_CARD, foreground=COLOR_MUTED)
+        s.configure("Title.TLabel", font=(family, 18, "bold"), background=COLOR_DARK, foreground="#FFFFFF")
+        s.configure("PageTitle.TLabel", font=(family, 15, "bold"), background=COLOR_BG, foreground=COLOR_TEXT)
+        s.configure("Metric.TLabel", font=(family, 20, "bold"), background=COLOR_CARD, foreground=COLOR_TEXT)
+        s.configure("MetricRed.TLabel", font=(family, 20, "bold"), background=COLOR_CARD, foreground=COLOR_RED)
+        s.configure("TButton", padding=(12, 9), background="#FFFFFF", foreground=COLOR_TEXT)
+        s.configure("Primary.TButton", font=(family, 10, "bold"), padding=(14, 10), background=COLOR_RED, foreground="#FFFFFF")
+        s.map("Primary.TButton", background=[("active", COLOR_RED_DARK)], foreground=[("active", "#FFFFFF")])
+        s.configure("TNotebook", background=COLOR_BG, borderwidth=0)
+        s.configure("TNotebook.Tab", padding=(18, 9), background="#ECEEF2", foreground=COLOR_TEXT)
+        s.map("TNotebook.Tab", background=[("selected", COLOR_CARD)], foreground=[("selected", COLOR_RED)])
+        s.configure("Treeview", font=(family, 9), rowheight=28, background="#FFFFFF", fieldbackground="#FFFFFF", foreground=COLOR_TEXT, borderwidth=0)
+        s.configure("Treeview.Heading", font=(family, 9, "bold"), background="#F0F1F3", foreground=COLOR_TEXT)
 
     def build(self):
+        top = ttk.Frame(self, style="Top.TFrame", padding=(18, 14))
+        top.pack(fill="x")
+        ttk.Label(top, text="حضور | Hozoor Sync", style="Title.TLabel").pack(side="right")
+        ttk.Label(top, text="نسخه مشتری نهایی — اتصال به سرور مرکزی", style="Top.TLabel").pack(side="left")
+
         main = ttk.Frame(self, padding=16)
         main.pack(fill="both", expand=True)
-
-        head = ttk.Frame(main)
-        head.pack(fill="x", pady=(0, 12))
-        ttk.Label(head, text="Hozoor Sync", style="Title.TLabel").pack(side="left")
-        ttk.Label(head, text="نسخه مشتری / ساده، سریع، متصل به سرور").pack(side="right")
 
         nb = ttk.Notebook(main)
         nb.pack(fill="both", expand=True)
 
         self.home = ttk.Frame(nb, padding=14)
-        self.devices_tab = ttk.Frame(nb, padding=14)
+        self.device_tab = ttk.Frame(nb, padding=14)
         self.sync_tab = ttk.Frame(nb, padding=14)
         self.settings_tab = ttk.Frame(nb, padding=14)
         self.support_tab = ttk.Frame(nb, padding=14)
 
         nb.add(self.home, text="خانه")
-        nb.add(self.devices_tab, text="دستگاه‌ها")
+        nb.add(self.device_tab, text="دستگاه")
         nb.add(self.sync_tab, text="همگام‌سازی")
         nb.add(self.settings_tab, text="تنظیمات")
         nb.add(self.support_tab, text="پشتیبانی")
 
         self.build_home()
-        self.build_devices()
+        self.build_device()
         self.build_sync()
         self.build_settings()
         self.build_support()
 
-        bottom = ttk.Frame(main)
-        bottom.pack(fill="x", pady=(10, 0))
-        ttk.Label(bottom, textvariable=self.status_var).pack(side="left")
-        ttk.Label(bottom, text=f"Server ID: {SERVER_ID}").pack(side="right")
+        bottom = ttk.Frame(self, padding=(18, 9))
+        bottom.pack(fill="x")
+        ttk.Label(bottom, textvariable=self.status_var, foreground=COLOR_MUTED).pack(side="right")
+        ttk.Label(bottom, text=f"Server ID: {SERVER_ID}", foreground=COLOR_MUTED).pack(side="left")
 
-    def card(self, parent, title, var):
-        f = ttk.Frame(parent, style="Card.TFrame", padding=14)
-        ttk.Label(f, text=title, style="Card.TLabel").pack(anchor="e")
-        ttk.Label(f, textvariable=var, style="Metric.TLabel").pack(anchor="e", pady=(5,0))
+    def card(self, parent, title, var, red=False):
+        f = ttk.Frame(parent, style="Card.TFrame", padding=16)
+        ttk.Label(f, text=title, style="CardMuted.TLabel").pack(anchor="e")
+        ttk.Label(f, textvariable=var, style="MetricRed.TLabel" if red else "Metric.TLabel").pack(anchor="e", pady=(8, 0))
         return f
 
     def build_home(self):
+        ttk.Label(self.home, text="وضعیت کلی", style="PageTitle.TLabel").pack(anchor="e", pady=(0, 12))
         cards = ttk.Frame(self.home)
         cards.pack(fill="x")
-        self.card(cards, "دستگاه‌ها", self.devices_var).pack(side="right", fill="x", expand=True, padx=6)
-        self.card(cards, "در انتظار ارسال", self.unsynced_var).pack(side="right", fill="x", expand=True, padx=6)
-        self.card(cards, "آخرین همگام‌سازی", self.last_sync_var).pack(side="right", fill="x", expand=True, padx=6)
+        self.card(cards, "وضعیت دستگاه", self.device_state_var, red=True).pack(side="right", fill="x", expand=True, padx=6)
+        self.card(cards, "کد دستگاه", self.device_code_var).pack(side="right", fill="x", expand=True, padx=6)
+        self.card(cards, "در انتظار ارسال", self.unsynced_var, red=True).pack(side="right", fill="x", expand=True, padx=6)
         self.card(cards, "وضعیت سرور", self.server_var).pack(side="right", fill="x", expand=True, padx=6)
 
         actions = ttk.Frame(self.home)
         actions.pack(fill="x", pady=20)
-        ttk.Button(actions, text="شروع", command=self.engine.start).pack(side="right", padx=5)
-        ttk.Button(actions, text="توقف", command=self.engine.stop).pack(side="right", padx=5)
+        ttk.Button(actions, text="شروع", style="Primary.TButton", command=self.engine.start).pack(side="right", padx=5)
         ttk.Button(actions, text="همگام‌سازی الآن", command=self.run_once).pack(side="right", padx=5)
+        ttk.Button(actions, text="توقف", command=self.engine.stop).pack(side="right", padx=5)
         ttk.Button(actions, text="بازخوانی", command=self.refresh).pack(side="right", padx=5)
 
-        box = ttk.Frame(self.home, style="Card.TFrame", padding=14)
-        box.pack(fill="x", pady=(8,0))
-        ttk.Label(box, style="Card.TLabel", justify="right", wraplength=850,
-                  text="این نسخه به یک دستگاه خاص قفل نیست؛ device_code از دستگاه خوانده می‌شود و Laravel مسیر مشتری/شعبه را تشخیص می‌دهد.").pack(anchor="e")
-        ttk.Label(box, style="Card.TLabel", justify="right", wraplength=850,
-                  text="ACK فقط با ok:true + ack_allowed:true + ack_until_event_id از سرور انجام می‌شود.").pack(anchor="e", pady=(6,0))
+        box = ttk.Frame(self.home, style="Card.TFrame", padding=16)
+        box.pack(fill="x", pady=(8, 0))
+        ttk.Label(box, style="Card.TLabel", justify="right", wraplength=880,
+                  text="این نرم‌افزار برای اتصال یک دستگاه حضور به سرور مرکزی استفاده می‌شود. نرم‌افزار به دستگاه خاص قفل نیست؛ کد دستگاه از خود سخت‌افزار خوانده می‌شود و سرور مرکزی تشخیص می‌دهد اطلاعات متعلق به کدام مشتری و شعبه است.").pack(anchor="e")
+        ttk.Label(box, style="CardMuted.TLabel", justify="right", wraplength=880,
+                  text="آدرس سرور در نسخه نهایی داخل فایل نصب بسته‌بندی می‌شود و در UI مشتری قابل تغییر نیست.").pack(anchor="e", pady=(8, 0))
 
-    def build_devices(self):
-        top = ttk.Frame(self.devices_tab)
-        top.pack(fill="x", pady=(0,8))
-        ttk.Button(top, text="جستجوی دستگاه‌ها", command=self.detect).pack(side="right")
-        cols = ("device_code","port","status","last_seen")
-        self.devices_tree = ttk.Treeview(self.devices_tab, columns=cols, show="headings", height=14)
-        for c, t, w in [
-            ("device_code","Device Code",160), ("port","Port",120), ("status","Status",120), ("last_seen","Last Seen",200)
-        ]:
-            self.devices_tree.heading(c, text=t)
-            self.devices_tree.column(c, width=w, anchor="center")
-        self.devices_tree.pack(fill="both", expand=True)
+    def build_device(self):
+        ttk.Label(self.device_tab, text="دستگاه متصل", style="PageTitle.TLabel").pack(anchor="e", pady=(0, 12))
+        box = ttk.Frame(self.device_tab, style="Card.TFrame", padding=16)
+        box.pack(fill="x")
+        for i, (label, var) in enumerate([
+            ("وضعیت", self.device_state_var),
+            ("کد دستگاه", self.device_code_var),
+            ("درگاه اتصال", self.port_var),
+            ("آخرین همگام‌سازی", self.last_sync_var),
+        ]):
+            ttk.Label(box, text=label, style="CardMuted.TLabel").grid(row=i, column=1, sticky="e", padx=8, pady=8)
+            ttk.Label(box, textvariable=var, style="Card.TLabel").grid(row=i, column=0, sticky="e", padx=8, pady=8)
+        ttk.Button(self.device_tab, text="جستجوی دستگاه", command=self.detect).pack(anchor="e", pady=14)
 
     def build_sync(self):
+        ttk.Label(self.sync_tab, text="رکوردهای اخیر", style="PageTitle.TLabel").pack(anchor="e", pady=(0, 12))
         top = ttk.Frame(self.sync_tab)
-        top.pack(fill="x", pady=(0,8))
+        top.pack(fill="x", pady=(0, 8))
         ttk.Button(top, text="بررسی سلامت دیتابیس", command=self.verify).pack(side="right", padx=4)
         ttk.Button(top, text="بازخوانی", command=self.refresh_events).pack(side="right", padx=4)
-
-        cols = ("device_code","event_id","finger_id","event_time","source","server_synced","received_at")
+        cols = ("event_id", "finger_id", "event_time", "source", "server_synced", "received_at")
         self.events_tree = ttk.Treeview(self.sync_tab, columns=cols, show="headings", height=14)
         for c, t, w in [
-            ("device_code","Device",110), ("event_id","Event ID",80), ("finger_id","Finger",80),
-            ("event_time","Event Time",150), ("source","Source",150), ("server_synced","Synced",80), ("received_at","Received",170)
+            ("event_id", "Event ID", 90), ("finger_id", "Finger", 90),
+            ("event_time", "زمان رویداد", 160), ("source", "منبع", 150),
+            ("server_synced", "ارسال", 90), ("received_at", "زمان ثبت PC", 180)
         ]:
             self.events_tree.heading(c, text=t)
             self.events_tree.column(c, width=w, anchor="center")
         self.events_tree.pack(fill="both", expand=True)
-        ttk.Label(self.sync_tab, textvariable=self.hash_var).pack(anchor="e", pady=(8,0))
+        ttk.Label(self.sync_tab, textvariable=self.hash_var, foreground=COLOR_MUTED).pack(anchor="e", pady=(8, 0))
 
     def build_settings(self):
-        box = ttk.Frame(self.settings_tab, style="Card.TFrame", padding=14)
-        box.pack(fill="x", pady=(0,12))
-        ttk.Label(box, style="Card.TLabel", justify="right", wraplength=850,
-                  text="server_url و token در نسخه مشتری داخل EXE هستند و اینجا قابل تغییر نیستند. این بخش فقط تنظیمات غیرحساس است.").pack(anchor="e")
+        ttk.Label(self.settings_tab, text="تنظیمات غیرحساس", style="PageTitle.TLabel").pack(anchor="e", pady=(0, 12))
+        box = ttk.Frame(self.settings_tab, style="Card.TFrame", padding=16)
+        box.pack(fill="x", pady=(0, 12))
+        ttk.Label(box, style="Card.TLabel", justify="right", wraplength=880,
+                  text="در نسخه مشتری، لینک سرور و تنظیمات حساس داخل فایل نصب بسته‌بندی می‌شوند و اینجا قابل تغییر نیستند. این بخش فقط برای تنظیمات ساده و پشتیبانی است.").pack(anchor="e")
         settings = read_settings()
         fields = [
-            ("read_interval_seconds","فاصله خواندن دستگاه / ثانیه"),
-            ("sync_interval_seconds","فاصله ارسال به سرور / ثانیه"),
-            ("heartbeat_interval_seconds","فاصله Heartbeat / ثانیه"),
-            ("restore_interval_seconds","فاصله Restore از سرور / ثانیه"),
-            ("command_interval_seconds","فاصله دریافت دستور / ثانیه"),
-            ("preferred_port","Port ترجیحی اختیاری"),
+            ("read_interval_seconds", "فاصله خواندن دستگاه / ثانیه"),
+            ("sync_interval_seconds", "فاصله ارسال به سرور / ثانیه"),
+            ("heartbeat_interval_seconds", "فاصله وضعیت سرور / ثانیه"),
+            ("restore_interval_seconds", "فاصله بازیابی از سرور / ثانیه"),
+            ("command_interval_seconds", "فاصله دریافت دستور / ثانیه"),
+            ("preferred_port", "Port ترجیحی اختیاری"),
         ]
         form = ttk.Frame(self.settings_tab)
         form.pack(fill="x")
@@ -830,16 +889,17 @@ class App(tk.Tk):
             v = tk.StringVar(value=str(settings.get(k, DEFAULT_SETTINGS.get(k, ""))))
             self.settings_vars[k] = v
             ttk.Entry(form, textvariable=v, width=32, justify="right").grid(row=i, column=0, sticky="e", padx=8, pady=6)
-        ttk.Button(self.settings_tab, text="ذخیره تنظیمات", command=self.save_settings).pack(anchor="e", pady=12)
+        ttk.Button(self.settings_tab, text="ذخیره تنظیمات", style="Primary.TButton", command=self.save_settings).pack(anchor="e", pady=12)
 
     def build_support(self):
-        box = ttk.Frame(self.support_tab, style="Card.TFrame", padding=14)
+        ttk.Label(self.support_tab, text="پشتیبانی", style="PageTitle.TLabel").pack(anchor="e", pady=(0, 12))
+        box = ttk.Frame(self.support_tab, style="Card.TFrame", padding=16)
         box.pack(fill="x")
         for line in [
             f"Version: {APP_VERSION}", f"Build Channel: {BUILD_CHANNEL}", f"Server ID: {SERVER_ID}",
-            f"Data Folder: {APP_DIR}", f"Database: {DB_PATH}", f"Log File: {LOG_PATH}"
+            f"Data Folder: {APP_DIR}", f"Database: {DB_PATH}", f"Log File: {LOG_PATH}", f"Font: {self.font_family}"
         ]:
-            ttk.Label(box, text=line, style="Card.TLabel").pack(anchor="w")
+            ttk.Label(box, text=line, style="Card.TLabel").pack(anchor="w", pady=2)
         a = ttk.Frame(self.support_tab)
         a.pack(fill="x", pady=14)
         ttk.Button(a, text="باز کردن پوشه داده", command=self.open_folder).pack(side="right", padx=4)
@@ -863,34 +923,36 @@ class App(tk.Tk):
                     self.status_var.set(str(data))
                 elif name == "error":
                     self.status_var.set("خطا: " + str(data))
+                    self.server_var.set("خطا")
                 elif name == "refresh":
                     self.refresh()
         except queue.Empty:
             pass
         self.after(500, self.process_ui)
 
+    def current_device_row(self) -> Dict[str, Any]:
+        rows = self.db.devices()
+        return rows[0] if rows else {}
+
     def refresh(self):
         c = self.db.counts()
-        self.devices_var.set(str(c["devices"]))
+        d = self.current_device_row()
+        connected = bool(d.get("device_code"))
+        self.device_state_var.set("متصل" if connected else "متصل نیست")
+        self.device_code_var.set(d.get("device_code") or "-")
+        self.port_var.set(d.get("last_port") or "-")
         self.unsynced_var.set(str(c["unsynced"]))
         self.server_var.set(self.engine.server_status)
         self.last_sync_var.set(self.engine.last_sync)
-        self.refresh_devices()
         self.refresh_events()
-
-    def refresh_devices(self):
-        for i in self.devices_tree.get_children():
-            self.devices_tree.delete(i)
-        for d in self.db.devices():
-            self.devices_tree.insert("", "end", values=(d.get("device_code",""), d.get("last_port",""), d.get("status",""), d.get("last_seen_at","")))
 
     def refresh_events(self):
         for i in self.events_tree.get_children():
             self.events_tree.delete(i)
         for e in self.db.recent(120):
             self.events_tree.insert("", "end", values=(
-                e.get("device_code",""), e.get("event_id",""), e.get("finger_id",""), e.get("event_time",""),
-                e.get("source",""), "yes" if e.get("server_synced") else "no", e.get("received_at","")
+                e.get("event_id", ""), e.get("finger_id", ""), e.get("event_time", ""),
+                e.get("source", ""), "ارسال شد" if e.get("server_synced") else "در انتظار", e.get("received_at", "")
             ))
 
     def save_settings(self):
@@ -932,7 +994,7 @@ class App(tk.Tk):
         messagebox.showinfo("Done", "Log exported.")
 
     def about(self):
-        messagebox.showinfo("Hozoor Sync", f"{APP_NAME}\n{APP_VERSION}\n\nServer-bound, not device-bound.\nUTF-8 ready.\nStrict Safe ACK.")
+        messagebox.showinfo("Hozoor Sync", f"حضور | Hozoor Sync\n{APP_VERSION}\n\nاتصال یک دستگاه به سرور مرکزی حضور\nAvaye Farda Media")
 
 def main() -> int:
     log_line("Starting " + APP_VERSION)

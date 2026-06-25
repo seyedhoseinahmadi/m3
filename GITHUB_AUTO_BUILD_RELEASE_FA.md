@@ -19,7 +19,7 @@
 
 ```text
 HozoorSyncCustomer_Setup_latest.exe
-HozoorSyncCustomer_Setup_v0_2_5.exe
+HozoorSyncCustomer_Setup.exe
 ```
 
 Release ثابت:

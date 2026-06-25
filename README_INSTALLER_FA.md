@@ -3,13 +3,13 @@
 نسخه:
 
 ```text
-CUSTOMER-FINAL-INSTALLER-0.2.5
+CUSTOMER-FINAL-INSTALLER-0.2.7
 ```
 
 این پکیج برای ساخت فایل نصب نهایی ویندوز است:
 
 ```text
-HozoorSyncCustomer_Setup_v0_2_5.exe
+HozoorSyncCustomer_Setup.exe
 ```
 
 ## تفاوت با نسخه Portable
@@ -58,7 +58,7 @@ Agent Token اختیاری
 ## خروجی
 
 ```text
-Output\HozoorSyncCustomer_Setup_v0_2_5.exe
+Output\HozoorSyncCustomer_Setup.exe
 ```
 
 ## ساخت با GitHub
