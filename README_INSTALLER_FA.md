@@ -3,7 +3,7 @@
 نسخه:
 
 ```text
-CUSTOMER-FINAL-INSTALLER-0.2.7
+CUSTOMER-FINAL-INSTALLER-0.2.9
 ```
 
 این پکیج برای ساخت فایل نصب نهایی ویندوز است:

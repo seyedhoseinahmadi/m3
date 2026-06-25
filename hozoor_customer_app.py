@@ -17,6 +17,7 @@ import ctypes
 import hashlib
 import json
 import os
+import sys
 import queue
 import socket
 import sqlite3
@@ -47,7 +48,7 @@ from tkinter import font as tkfont
 try:
     from hozoor_customer_build_config import APP_VERSION, APP_NAME, SERVER_URL, SERVER_ID, AGENT_TOKEN, BUILD_CHANNEL
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.2.7-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.2.9-DEV"
     APP_NAME = "Hozoor Sync"
     SERVER_URL = "https://YOUR-HOZOOR-SERVER.example.com"
     SERVER_ID = "HOZOOR_MAIN"

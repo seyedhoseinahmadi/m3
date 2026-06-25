@@ -1,14 +1,14 @@
 #define MyAppName "Hozoor Sync"
 #define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
 #if MyAppVersion == ""
-#define MyAppVersion "0.2.7"
+#define MyAppVersion "0.2.9"
 #endif
 #define MyAppPublisher "Avaye Farda Media"
 #define MyAppURL "https://avayefardamedia.com"
 #define MyAppExeName "HozoorSyncCustomer.exe"
 
 [Setup]
-AppId={{B5B49748-7D5A-4E75-91F2-202600000247}
+AppId={{B5B49748-7D5A-4E75-91F2-202600000248}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
