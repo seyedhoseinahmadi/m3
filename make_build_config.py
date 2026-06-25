@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse, os
 from pathlib import Path
 
-APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.2.9"
+APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.0"
 
 def clean_url(url: str) -> str:
     url = (url or "").strip().rstrip("/")
@@ -39,7 +39,7 @@ def main() -> int:
 
     server_url = clean_url(server_url)
     content = f'''# -*- coding: utf-8 -*-
-APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.2.9"
+APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.0"
 APP_NAME = "Hozoor Sync"
 SERVER_URL = {server_url!r}
 SERVER_ID = {server_id!r}

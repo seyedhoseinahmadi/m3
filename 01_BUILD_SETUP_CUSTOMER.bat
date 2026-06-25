@@ -27,6 +27,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
+python prepare_fonts.py
 python make_build_config.py
 if errorlevel 1 (
     echo ERROR: Could not generate build config.

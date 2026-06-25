@@ -1,6 +1,5 @@
 pyserial>=3.5
 requests>=2.31.0
 pyinstaller>=6.0.0
-
 fonttools>=4.0.0
 brotli>=1.0.9

@@ -1,34 +1,50 @@
 # -*- coding: utf-8 -*-
-"""Convert optional AFY WOFF/WOFF2 fonts to TTF before build.
-No font files are bundled by default. Put licensed font files in assets/fonts.
 """
+Prepare AFY fonts for Hozoor Sync build.
+
+This script does not include or download any font.
+If licensed font files are provided by project owner in assets/fonts as WOFF/WOFF2,
+it tries to convert them to TTF so Windows/Tkinter can load them.
+
+Input examples:
+- assets/fonts/AFYRegular.woff2
+- assets/fonts/AFYBold.woff2
+
+Output examples:
+- assets/fonts/AFYRegular.ttf
+- assets/fonts/AFYBold.ttf
+"""
+
 from pathlib import Path
 
+FONTS_DIR = Path("assets") / "fonts"
+
+
 def main() -> int:
-    fonts_dir = Path('assets/fonts')
-    fonts_dir.mkdir(parents=True, exist_ok=True)
+    FONTS_DIR.mkdir(parents=True, exist_ok=True)
     try:
         from fontTools.ttLib import TTFont
     except Exception:
-        print('fontTools not installed; skipping font conversion')
+        print("fontTools is not available; skipping font conversion.")
         return 0
-    for name in ['AFYRegular', 'AFYBold']:
-        out = fonts_dir / f'{name}.ttf'
+
+    converted = 0
+    for src in list(FONTS_DIR.glob("*.woff")) + list(FONTS_DIR.glob("*.woff2")):
+        out = src.with_suffix(".ttf")
         if out.exists():
-            print(f'{out} already exists')
             continue
-        for ext in ['woff2', 'woff']:
-            src = fonts_dir / f'{name}.{ext}'
-            if src.exists():
-                try:
-                    font = TTFont(str(src))
-                    font.flavor = None
-                    font.save(str(out))
-                    print(f'Converted {src} -> {out}')
-                    break
-                except Exception as exc:
-                    print(f'Could not convert {src}: {exc}')
+        try:
+            font = TTFont(str(src))
+            font.flavor = None
+            font.save(str(out))
+            print(f"Converted {src} -> {out}")
+            converted += 1
+        except Exception as exc:
+            print(f"Could not convert {src}: {exc}")
+
+    print(f"Font conversion done. Converted: {converted}")
     return 0
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     raise SystemExit(main())

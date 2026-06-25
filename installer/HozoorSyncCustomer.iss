@@ -1,7 +1,10 @@
 #define MyAppName "Hozoor Sync"
 #define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
 #if MyAppVersion == ""
-#define MyAppVersion "0.2.9"
+#define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
+#if MyAppVersion == ""
+#define MyAppVersion "0.3.0"
+#endif
 #endif
 #define MyAppPublisher "Avaye Farda Media"
 #define MyAppURL "https://avayefardamedia.com"
