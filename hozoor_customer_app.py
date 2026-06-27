@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Hozoor Sync - Customer Final Installer
-Version: CUSTOMER-FINAL-INSTALLER-0.3.2
+Version: CUSTOMER-FINAL-INSTALLER-0.3.3
 
 Rules:
 - Customer UI is clean and product-facing, not debug-facing.
@@ -57,7 +57,7 @@ try:
         BUILD_CHANNEL,
     )
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.2-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.3-DEV"
     APP_NAME = "Hozoor Sync"
     SERVER_URL = "https://hozoor.example.com"
     SERVER_ID = "HOZOOR_MAIN"
@@ -563,9 +563,24 @@ class LaravelClient:
             raise RuntimeError("requests نصب نیست")
         endpoint = self.settings.get(endpoint_key, DEFAULT_SETTINGS[endpoint_key])
         response = requests.post(join_url(SERVER_URL, endpoint), headers=self.headers(), json=payload, timeout=timeout)
-        if not (200 <= response.status_code < 300):
-            raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
-        return response.json()
+
+        # Laravel may return HTTP 422 for business validation errors, for example:
+        # ok:false + Unknown/inactive device_code. This means the server is reachable.
+        # Do not convert it to a connection error; return the JSON so upper layers can
+        # show "وصل / دستگاه ثبت نشده" and avoid ACK.
+        try:
+            data = response.json()
+        except Exception:
+            data = None
+
+        if 200 <= response.status_code < 300:
+            return data if isinstance(data, dict) else {}
+
+        if isinstance(data, dict):
+            data["_http_status"] = response.status_code
+            return data
+
+        raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
 
     def heartbeat(self, device: Optional[DeviceInfo], counts: Dict[str, int], hash_ok: bool, hash_msg: str) -> Dict[str, Any]:
         return self.post("heartbeat_endpoint", {
