@@ -1,4 +1,4 @@
-# Hotfix / Release 0.3.0
+# Hotfix / Release 0.3.2
 
 ## اصلاحات UI
 

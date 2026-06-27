@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Hozoor Sync - Customer Final Installer
-Version: CUSTOMER-FINAL-INSTALLER-0.3.0
+Version: CUSTOMER-FINAL-INSTALLER-0.3.2
 
 Rules:
 - Customer UI is clean and product-facing, not debug-facing.
@@ -57,7 +57,7 @@ try:
         BUILD_CHANNEL,
     )
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.0-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.2-DEV"
     APP_NAME = "Hozoor Sync"
     SERVER_URL = "https://hozoor.example.com"
     SERVER_ID = "HOZOOR_MAIN"
@@ -69,12 +69,12 @@ BAUDRATE = 9600
 
 DEFAULT_SETTINGS = {
     "auto_start_sync": True,
-    "read_interval_seconds": 20,
-    "sync_interval_seconds": 20,
-    "heartbeat_interval_seconds": 120,
-    "restore_interval_seconds": 180,
-    "command_interval_seconds": 15,
-    "serial_timeout_seconds": 3,
+    "read_interval_seconds": 3,
+    "sync_interval_seconds": 5,
+    "heartbeat_interval_seconds": 30,
+    "restore_interval_seconds": 300,
+    "command_interval_seconds": 10,
+    "serial_timeout_seconds": 2,
     "max_batch_size": 100,
     "preferred_port": "",
     "events_endpoint": "/api/hozoor/events/batch",
@@ -558,7 +558,7 @@ class LaravelClient:
             headers["Authorization"] = f"Bearer {AGENT_TOKEN}"
         return headers
 
-    def post(self, endpoint_key: str, payload: Dict[str, Any], timeout: int = 12) -> Dict[str, Any]:
+    def post(self, endpoint_key: str, payload: Dict[str, Any], timeout: int = 6) -> Dict[str, Any]:
         if requests is None:
             raise RuntimeError("requests نصب نیست")
         endpoint = self.settings.get(endpoint_key, DEFAULT_SETTINGS[endpoint_key])
@@ -583,7 +583,7 @@ class LaravelClient:
             "hash_chain_ok": hash_ok,
             "hash_message": hash_msg,
             "time": utc_now(),
-        })
+        }, timeout=4)
 
     def sync_events(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         return self.post("events_endpoint", {
@@ -603,7 +603,7 @@ class LaravelClient:
                     "record_hash": e["record_hash"],
                 } for e in events
             ],
-        }, timeout=20)
+        }, timeout=8)
 
     def restore_events(self, device_code: str = "") -> List[Dict[str, Any]]:
         data = self.post("restore_events_endpoint", {
@@ -611,7 +611,7 @@ class LaravelClient:
             "server_id": SERVER_ID,
             "pc_name": socket.gethostname(),
             "device_code": device_code,
-        }, timeout=20)
+        }, timeout=8)
         return data.get("restore_events", []) if data.get("ok") else []
 
     def restore_confirm(self, restored: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -654,6 +654,8 @@ class SyncEngine:
         self.last_sync_at = "-"
         self.last_server_status = "نامشخص"
         self.service_status = "متوقف"
+        self.server_is_reachable = False
+        self.first_restore_done = False
 
     def emit(self, event: str, data: Any = None) -> None:
         self.ui_queue.put((event, data))
@@ -681,32 +683,55 @@ class SyncEngine:
         self.status("سرویس متوقف شد")
 
     def run_loop(self) -> None:
-        last_read = last_sync = last_heartbeat = last_restore = last_command = 0.0
+        # Fast path:
+        # - Read device quickly.
+        # - Send pending events quickly.
+        # - Do not let restore/heartbeat/commands block first sync experience.
+        last_read = 0.0
+        last_sync = 0.0
+        last_heartbeat = time.time() - 20
+        last_restore = time.time()
+        last_command = time.time()
+
         while not self.stop_event.is_set():
             try:
                 self.reload_settings()
                 now = time.time()
-                if now - last_read >= int(self.settings.get("read_interval_seconds", 20)):
+
+                if now - last_read >= int(self.settings.get("read_interval_seconds", 3)):
                     self.detect_and_read()
                     last_read = now
-                if now - last_sync >= int(self.settings.get("sync_interval_seconds", 20)):
+
+                if now - last_sync >= int(self.settings.get("sync_interval_seconds", 5)):
                     self.sync_to_server()
                     last_sync = now
-                if now - last_restore >= int(self.settings.get("restore_interval_seconds", 180)):
-                    self.restore_from_server()
-                    last_restore = now
-                if now - last_command >= int(self.settings.get("command_interval_seconds", 15)):
-                    self.pull_and_execute_commands()
-                    last_command = now
-                if now - last_heartbeat >= int(self.settings.get("heartbeat_interval_seconds", 120)):
+
+                # Heartbeat is secondary; shorter timeout in client.
+                if now - last_heartbeat >= int(self.settings.get("heartbeat_interval_seconds", 30)):
                     self.send_heartbeat()
                     last_heartbeat = now
+
+                # Commands only after at least one reachable server check.
+                if self.server_is_reachable and now - last_command >= int(self.settings.get("command_interval_seconds", 10)):
+                    self.pull_and_execute_commands()
+                    last_command = now
+
+                # Restore is heavy/rare. It should not slow normal attendance sync.
+                if self.server_is_reachable and now - last_restore >= int(self.settings.get("restore_interval_seconds", 300)):
+                    self.restore_from_server()
+                    last_restore = now
+
                 self.emit("refresh", None)
             except Exception as exc:
                 self.db.add_log("ERROR", f"loop: {exc}")
-                self.last_server_status = "خطا"
-                self.emit("error", str(exc))
-            time.sleep(1)
+                msg = str(exc)
+                if "HTTPConnectionPool" in msg or "HTTPSConnectionPool" in msg or "Max retries exceeded" in msg or "Failed to establish" in msg:
+                    self.last_server_status = "قطع"
+                else:
+                    self.last_server_status = "خطا"
+                self.server_is_reachable = False
+                self.emit("error", msg)
+            time.sleep(0.5)
 
     def run_once(self) -> None:
         try:
@@ -732,13 +757,35 @@ class SyncEngine:
     def sync_to_server(self) -> None:
         events = self.db.unsynced_events(int(self.settings.get("max_batch_size", 100)))
         if not events:
-            self.last_server_status = "وصل"
             return
         data = self.client.sync_events(events)
+
+        # HTTP 200 with ok:false means the Laravel server is reachable,
+        # but business validation rejected the payload. Do not show it as
+        # a connection/server error in the customer UI.
         if data.get("ok") is not True:
-            raise RuntimeError("پاسخ سرور ok:true نیست")
+            self.server_is_reachable = True
+            message = str(data.get("message") or "پاسخ سرور تایید نشد")
+            errors = data.get("errors") or {}
+
+            is_device_problem = (
+                "device_code" in errors
+                or "device_code" in message
+                or "Unknown or inactive" in message
+            )
+
+            if is_device_problem:
+                self.last_server_status = "وصل / دستگاه ثبت نشده"
+                self.status("سرور وصل است، اما کد دستگاه در پنل ثبت یا فعال نشده است")
+            else:
+                self.last_server_status = "وصل / نیاز به بررسی"
+                self.status(message)
+
+            # Never ACK when Laravel rejects the event.
+            return
 
         self.last_server_status = "وصل"
+        self.server_is_reachable = True
         self.last_sync_at = local_now()
 
         ack_allowed = data.get("ack_allowed") is True
@@ -782,7 +829,11 @@ class SyncEngine:
     def send_heartbeat(self) -> None:
         ok_hash, hash_msg = self.db.verify_hash_chain()
         data = self.client.heartbeat(self.device, self.db.counts(), ok_hash, hash_msg)
-        self.last_server_status = "وصل" if data.get("ok") is True else "پاسخ نامعتبر"
+        if data.get("ok") is True:
+            self.last_server_status = "وصل"
+            self.server_is_reachable = True
+        else:
+            self.last_server_status = "پاسخ نامعتبر"
 
     def pull_and_execute_commands(self) -> None:
         if not self.device:
@@ -848,12 +899,34 @@ class HozoorApp(tk.Tk):
 
         if not SETTINGS_PATH.exists():
             write_json(SETTINGS_PATH, read_json(SETTINGS_PATH, DEFAULT_SETTINGS))
+        else:
+            self.migrate_fast_defaults()
 
         if read_json(SETTINGS_PATH, DEFAULT_SETTINGS).get("auto_start_sync", True):
             self.engine.start()
 
         self.after(500, self.process_queue)
         self.after(1000, self.auto_refresh_ui)
+
+    def migrate_fast_defaults(self) -> None:
+        # Existing installs may have old slow defaults saved in AppData.
+        # Only reduce values that are still equal to the old defaults.
+        settings = read_json(SETTINGS_PATH, DEFAULT_SETTINGS)
+        changed = False
+        migration = {
+            "read_interval_seconds": (20, 3),
+            "sync_interval_seconds": (20, 5),
+            "heartbeat_interval_seconds": (120, 30),
+            "restore_interval_seconds": (180, 300),
+            "command_interval_seconds": (15, 10),
+            "serial_timeout_seconds": (3, 2),
+        }
+        for key, (old, new) in migration.items():
+            if settings.get(key) == old:
+                settings[key] = new
+                changed = True
+        if changed:
+            write_json(SETTINGS_PATH, settings)
 
     def setup_base_fonts(self) -> None:
         self.f_normal = (self.font_family, 10)
@@ -936,7 +1009,7 @@ class HozoorApp(tk.Tk):
         return frame
 
     def build_home(self, parent: tk.Frame) -> None:
-        self.section_title(parent, "وضعیت کلی", "اطلاعات به‌صورت خودکار بازخوانی و همگام‌سازی می‌شود.")
+        self.section_title(parent, "وضعیت کلی", "خواندن و ارسال رکوردها سریع و خودکار انجام می‌شود.")
 
         cards = tk.Frame(parent, bg=C_BG)
         cards.pack(fill="x")
