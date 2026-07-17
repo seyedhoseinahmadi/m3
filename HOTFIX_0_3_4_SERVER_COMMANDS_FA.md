@@ -1,4 +1,4 @@
-# Hotfix 0.3.7 - Server Commands / Fingerprint Enrollment
+# Hotfix 0.3.8 - Server Commands / Fingerprint Enrollment
 
 ## هدف
 

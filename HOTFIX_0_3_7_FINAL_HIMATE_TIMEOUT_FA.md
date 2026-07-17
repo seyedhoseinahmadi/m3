@@ -1,4 +1,4 @@
-# Hotfix 0.3.7 - HiMate + Timeout Final
+# Hotfix 0.3.8 - HiMate + Timeout Final
 
 این نسخه ترکیبی است و همه اصلاحات قبلی را هم‌زمان دارد:
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HiMate Sync - Customer Final Installer
-Version: CUSTOMER-FINAL-INSTALLER-0.3.7
+Version: CUSTOMER-FINAL-INSTALLER-0.3.8
 
 Rules:
 - Customer UI is clean and product-facing, not debug-facing.
@@ -57,7 +57,7 @@ try:
         BUILD_CHANNEL,
     )
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.7-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.8-DEV"
     APP_NAME = "HiMate Sync"
     SERVER_URL = "https://hozoor.example.com"
     SERVER_ID = "HOZOOR_MAIN"
@@ -597,12 +597,9 @@ class LaravelClient:
         if requests is None:
             raise RuntimeError("requests نصب نیست")
         endpoint = self.settings.get(endpoint_key, DEFAULT_SETTINGS[endpoint_key])
-        response = requests.post(join_url(SERVER_URL, endpoint), headers=self.headers(), json=payload, timeout=timeout)
+        url = join_url(SERVER_URL, endpoint)
+        response = requests.post(url, headers=self.headers(), json=payload, timeout=timeout)
 
-        # Laravel may return HTTP 422 for business validation errors, for example:
-        # ok:false + Unknown/inactive device_code. This means the server is reachable.
-        # Do not convert it to a connection error; return the JSON so upper layers can
-        # show "وصل / دستگاه ثبت نشده" and avoid ACK.
         try:
             data = response.json()
         except Exception:
@@ -611,11 +608,17 @@ class LaravelClient:
         if 200 <= response.status_code < 300:
             return data if isinstance(data, dict) else {}
 
+        # Laravel validation / business errors may still return JSON. Keep them parsable.
         if isinstance(data, dict):
             data["_http_status"] = response.status_code
             return data
 
-        raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
+        # Never show raw HTML error pages in customer UI. HTTP 502/503/504 usually means
+        # webserver/proxy/PHP-FPM/Laravel failure on server side, not device failure.
+        text = (response.text or "").replace("\n", " ").replace("\r", " ").strip()
+        if response.status_code in (502, 503, 504):
+            raise RuntimeError(f"HTTP {response.status_code}: خطای وب‌سرور یا پروکسی سمت سرور مرکزی. لاگ Laravel/PHP-FPM را بررسی کنید.")
+        raise RuntimeError(f"HTTP {response.status_code}: پاسخ غیر JSON از سرور ({endpoint})")
 
     def heartbeat(self, device: Optional[DeviceInfo], counts: Dict[str, int], hash_ok: bool, hash_msg: str) -> Dict[str, Any]:
         return self.post("heartbeat_endpoint", {
@@ -778,6 +781,9 @@ class SyncEngine:
                 if "Read timed out" in msg or "read timeout" in msg:
                     self.last_server_status = "کند / تایم‌اوت"
                     ui_msg = "پاسخ سرور کند است؛ برنامه دوباره تلاش می‌کند."
+                elif "HTTP 502" in msg or "HTTP 503" in msg or "HTTP 504" in msg:
+                    self.last_server_status = "خطای سرور"
+                    ui_msg = "سرور مرکزی خطای وب‌سرور برگرداند؛ لاگ Laravel/PHP-FPM باید بررسی شود."
                 elif "HTTPConnectionPool" in msg or "HTTPSConnectionPool" in msg or "Max retries exceeded" in msg or "Failed to establish" in msg:
                     self.last_server_status = "قطع"
                     ui_msg = "اتصال به سرور برقرار نشد؛ اینترنت، دامنه یا SSL را بررسی کنید."
@@ -803,6 +809,9 @@ class SyncEngine:
             if "Read timed out" in msg or "read timeout" in msg:
                 self.last_server_status = "کند / تایم‌اوت"
                 self.emit("error", "پاسخ سرور کند است؛ چند لحظه بعد دوباره امتحان کنید.")
+            elif "HTTP 502" in msg or "HTTP 503" in msg or "HTTP 504" in msg:
+                self.last_server_status = "خطای سرور"
+                self.emit("error", "سرور مرکزی خطای وب‌سرور برگرداند؛ لاگ Laravel/PHP-FPM باید بررسی شود.")
             else:
                 self.emit("error", msg)
 
@@ -898,11 +907,36 @@ class SyncEngine:
     def pull_and_execute_commands(self) -> None:
         if not self.device:
             return
-        for cmd in self.client.pull_commands(self.device):
+        try:
+            commands = self.client.pull_commands(self.device)
+        except Exception as exc:
+            self.db.add_log("ERROR", f"pull-commands failed: {exc}")
+            msg = str(exc)
+            if "HTTP 502" in msg or "HTTP 503" in msg or "HTTP 504" in msg:
+                self.status("دریافت دستور از سرور ناموفق است: خطای وب‌سرور سمت Laravel")
+            else:
+                self.status(f"دریافت دستور از سرور ناموفق است: {msg}")
+            return
+
+        for cmd in commands:
             command_uuid = str(cmd.get("command_uuid", ""))
             device_code = str(cmd.get("device_code", self.device.device_code))
             command_type = str(cmd.get("command_type", ""))
             payload = cmd.get("payload") or {}
+            if not isinstance(payload, dict):
+                payload = {}
+
+            employee_name = str(
+                payload.get("employee_name")
+                or payload.get("person_name")
+                or payload.get("full_name")
+                or cmd.get("employee_name")
+                or ""
+            ).strip()
+            employee_id = payload.get("employee_id") or cmd.get("employee_id")
+            finger_id = payload.get("finger_id")
+            command_type_upper = command_type.strip().upper()
+
             result = {
                 "device_code": device_code,
                 "command_uuid": command_uuid,
@@ -918,9 +952,23 @@ class SyncEngine:
 
                 serial_command = self.serial_bridge.command_for_device(command_type, payload)
                 timeout = self.serial_bridge.timeout_for_command(command_type)
-                self.status(f"اجرای دستور سرور: {command_type}")
-                self.db.add_log("INFO", f"command pulled: {command_uuid} {device_code} {command_type} -> {serial_command}")
 
+                if command_type_upper in ("ENROLL_FINGER", "ENROLL", "ADD_FINGER"):
+                    self.emit("enroll_start", {
+                        "command_uuid": command_uuid,
+                        "device_code": device_code,
+                        "finger_id": finger_id,
+                        "employee_id": employee_id,
+                        "employee_name": employee_name,
+                        "timeout": timeout,
+                    })
+                    name_part = f" برای {employee_name}" if employee_name else ""
+                    self.status(f"شروع ثبت اثر انگشت{name_part} - کد انگشت {finger_id}")
+                else:
+                    self.emit("command_notice", f"در حال اجرای دستور {command_type_upper} برای دستگاه {device_code}")
+                    self.status(f"اجرای دستور سرور: {command_type}")
+
+                self.db.add_log("INFO", f"command pulled: {command_uuid} {device_code} {command_type} -> {serial_command}")
                 lines = self.serial_bridge.send_command(self.device.port, serial_command, timeout=timeout)
                 has_error = any(str(l).startswith("ERR") for l in lines)
                 has_response = bool(lines)
@@ -932,9 +980,32 @@ class SyncEngine:
                     "serial_response": lines,
                     "error_message": None if success else ("No response from device" if not has_response else "Device returned error"),
                 })
+
+                if command_type_upper in ("ENROLL_FINGER", "ENROLL", "ADD_FINGER"):
+                    self.emit("enroll_result", {
+                        "ok": success,
+                        "employee_name": employee_name,
+                        "employee_id": employee_id,
+                        "finger_id": finger_id,
+                        "response": lines,
+                        "error_message": result["error_message"],
+                    })
+                    self.emit("command_notice", f"نتیجه ثبت اثر انگشت: {'موفق' if success else 'ناموفق'}")
+                else:
+                    self.emit("command_notice", f"نتیجه دستور {command_type_upper}: {'موفق' if success else 'ناموفق'}")
                 self.status(f"نتیجه دستور {command_type}: {'موفق' if success else 'ناموفق'}")
             except Exception as exc:
                 result["error_message"] = str(exc)
+                if command_type_upper in ("ENROLL_FINGER", "ENROLL", "ADD_FINGER"):
+                    self.emit("enroll_result", {
+                        "ok": False,
+                        "employee_name": employee_name,
+                        "employee_id": employee_id,
+                        "finger_id": finger_id,
+                        "response": [],
+                        "error_message": str(exc),
+                    })
+                self.emit("command_notice", f"خطا در اجرای دستور {command_type_upper}: {exc}")
                 self.status(f"خطا در اجرای دستور سرور: {exc}")
 
             self.db.record_command_log(command_uuid, device_code, command_type, result["serial_command"], result["status"], result)
@@ -969,6 +1040,9 @@ class HozoorApp(tk.Tk):
         self.status_var = tk.StringVar(value="آماده")
         self.last_sync_var = tk.StringVar(value="-")
         self.health_var = tk.StringVar(value="-")
+        self.command_notice_var = tk.StringVar(value="دستور فعالی دریافت نشده است")
+        self.enroll_window: Optional[tk.Toplevel] = None
+        self.enroll_status_var = tk.StringVar(value="")
 
         self.setup_base_fonts()
         self.build_ui()
@@ -1108,6 +1182,11 @@ class HozoorApp(tk.Tk):
             bg=C_SURFACE, fg=C_TEXT, font=self.f_normal, wraplength=760, justify="right"
         ).pack(anchor="e", padx=16, pady=16)
 
+        command_box = tk.Frame(parent, bg=C_SURFACE, highlightthickness=1, highlightbackground=C_LINE)
+        command_box.pack(fill="x", pady=(12, 0))
+        tk.Label(command_box, text="آخرین دستور سرور", bg=C_SURFACE, fg=C_MUTED, font=self.f_small).pack(anchor="e", padx=16, pady=(12, 0))
+        tk.Label(command_box, textvariable=self.command_notice_var, bg=C_SURFACE, fg=C_TEXT, font=self.f_bold, wraplength=760, justify="right").pack(anchor="e", padx=16, pady=(6, 14))
+
     def build_device(self, parent: tk.Frame) -> None:
         self.section_title(parent, "دستگاه متصل", "برنامه در هر لحظه با یک دستگاه کار می‌کند و کد دستگاه را از سخت‌افزار می‌خواند.")
         box = tk.Frame(parent, bg=C_SURFACE, highlightthickness=1, highlightbackground=C_LINE)
@@ -1210,11 +1289,88 @@ class HozoorApp(tk.Tk):
                     self.status_var.set(str(data))
                 elif event == "error":
                     self.status_var.set(f"خطا: {data}")
+                elif event == "command_notice":
+                    self.command_notice_var.set(str(data))
+                elif event == "enroll_start":
+                    self.show_enrollment_window(data or {})
+                elif event == "enroll_result":
+                    self.finish_enrollment_window(data or {})
                 elif event == "refresh":
                     self.refresh_ui()
         except queue.Empty:
             pass
         self.after(500, self.process_queue)
+
+    def show_enrollment_window(self, data: Dict[str, Any]) -> None:
+        try:
+            if self.enroll_window and self.enroll_window.winfo_exists():
+                self.enroll_window.destroy()
+        except Exception:
+            pass
+
+        employee_name = str(data.get("employee_name") or "").strip()
+        employee_id = data.get("employee_id")
+        finger_id = data.get("finger_id") or "-"
+        device_code = data.get("device_code") or self.device_code_var.get()
+        timeout = data.get("timeout") or 90
+
+        title_name = employee_name or (f"شناسه کارمند {employee_id}" if employee_id else "کاربر انتخاب‌شده در پنل")
+        self.command_notice_var.set(f"ثبت اثر انگشت برای {title_name} - کد انگشت {finger_id}")
+        self.enroll_status_var.set("لطفاً همین حالا انگشت را روی سنسور قرار دهید و تا پایان عملیات برندارید.")
+
+        win = tk.Toplevel(self)
+        self.enroll_window = win
+        win.title("ثبت اثر انگشت HiMate")
+        win.geometry("520x310")
+        win.resizable(False, False)
+        win.configure(bg=C_SURFACE)
+        try:
+            win.transient(self)
+            win.attributes("-topmost", True)
+        except Exception:
+            pass
+
+        tk.Label(win, text="ثبت اثر انگشت", bg=C_SURFACE, fg=C_RED, font=self.f_title).pack(anchor="e", padx=24, pady=(24, 6))
+        tk.Label(win, text="درخواست از سمت سرور دریافت شد", bg=C_SURFACE, fg=C_MUTED, font=self.f_normal).pack(anchor="e", padx=24)
+
+        info = tk.Frame(win, bg="#F8F8F8", highlightthickness=1, highlightbackground=C_LINE)
+        info.pack(fill="x", padx=24, pady=16)
+        rows = [
+            ("نام فرد", title_name),
+            ("کد انگشت", str(finger_id)),
+            ("کد دستگاه", str(device_code)),
+            ("مهلت تقریبی", f"{timeout} ثانیه"),
+        ]
+        for label, value in rows:
+            row = tk.Frame(info, bg="#F8F8F8")
+            row.pack(fill="x", padx=14, pady=5)
+            tk.Label(row, text=label, bg="#F8F8F8", fg=C_MUTED, font=self.f_small).pack(side="right")
+            tk.Label(row, text=value, bg="#F8F8F8", fg=C_TEXT, font=self.f_bold).pack(side="left")
+
+        tk.Label(win, textvariable=self.enroll_status_var, bg=C_SURFACE, fg=C_TEXT, font=self.f_bold, wraplength=460, justify="right").pack(anchor="e", padx=24, pady=(4, 10))
+        self.secondary_button(win, "بستن پنجره", win.destroy).pack(anchor="center", pady=(0, 18))
+
+    def finish_enrollment_window(self, data: Dict[str, Any]) -> None:
+        ok = bool(data.get("ok"))
+        employee_name = str(data.get("employee_name") or "").strip()
+        finger_id = data.get("finger_id") or "-"
+        target = employee_name or "کاربر انتخاب‌شده"
+        if ok:
+            msg = f"ثبت اثر انگشت برای {target} با موفقیت انجام شد. کد انگشت: {finger_id}"
+            self.enroll_status_var.set(msg)
+            self.command_notice_var.set(msg)
+        else:
+            err = data.get("error_message") or "دستگاه پاسخ موفق نداد"
+            msg = f"ثبت اثر انگشت برای {target} ناموفق بود. {err}"
+            self.enroll_status_var.set(msg)
+            self.command_notice_var.set(msg)
+
+        try:
+            if self.enroll_window and self.enroll_window.winfo_exists():
+                self.enroll_window.attributes("-topmost", True)
+                self.enroll_window.after(9000, self.enroll_window.destroy)
+        except Exception:
+            pass
 
     def auto_refresh_ui(self) -> None:
         self.refresh_ui()

@@ -1,4 +1,4 @@
-# Hotfix 0.3.7 - HiMate Branding
+# Hotfix 0.3.8 - HiMate Branding
 
 ## تغییر
 

@@ -3,7 +3,7 @@
 #if MyAppVersion == ""
 #define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
 #if MyAppVersion == ""
-#define MyAppVersion "0.3.7"
+#define MyAppVersion "0.3.8"
 #endif
 #endif
 #define MyAppPublisher "Avaye Farda Media"
