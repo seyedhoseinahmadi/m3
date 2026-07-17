@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Hozoor Sync - Customer Final Installer
-Version: CUSTOMER-FINAL-INSTALLER-0.3.3
+Version: CUSTOMER-FINAL-INSTALLER-0.3.4
 
 Rules:
 - Customer UI is clean and product-facing, not debug-facing.
@@ -57,7 +57,7 @@ try:
         BUILD_CHANNEL,
     )
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.3-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.4-DEV"
     APP_NAME = "Hozoor Sync"
     SERVER_URL = "https://hozoor.example.com"
     SERVER_ID = "HOZOOR_MAIN"
@@ -530,16 +530,51 @@ class SerialBridge:
 
     def command_for_device(self, command_type: str, payload: Dict[str, Any]) -> str:
         t = (command_type or "").strip().upper()
-        if t == "PING": return "PING"
-        if t == "DEVICE": return "DEVICE"
-        if t == "STATUS": return "STATUS"
-        if t == "TIME": return "TIME?"
-        if t == "READ_EVENTS": return "R"
-        if t == "ENROLL_FINGER": return f"A {int(payload['finger_id'])}"
-        if t == "DELETE_FINGER": return f"M {int(payload['finger_id'])}"
-        if t == "SET_SERVER_TIME": return f"TS {payload['server_time']}"
-        if t == "REBOOT": return "REBOOT"
+        payload = payload or {}
+
+        if t == "PING":
+            return "PING"
+        if t == "DEVICE":
+            return "DEVICE"
+        if t == "STATUS":
+            return "STATUS"
+        if t in ("TIME", "GET_TIME"):
+            return "TIME?"
+        if t in ("READ_EVENTS", "SEND_PENDING"):
+            return "R"
+
+        if t in ("ENROLL_FINGER", "ENROLL", "ADD_FINGER"):
+            finger_id = int(payload.get("finger_id", 0))
+            if finger_id <= 0:
+                raise ValueError("finger_id is required for ENROLL_FINGER")
+            return f"A {finger_id}"
+
+        if t in ("DELETE_FINGER", "DELETE", "REMOVE_FINGER"):
+            finger_id = int(payload.get("finger_id", 0))
+            if finger_id <= 0:
+                raise ValueError("finger_id is required for DELETE_FINGER")
+            return f"M {finger_id}"
+
+        if t in ("SET_TIME", "SET_SERVER_TIME"):
+            timestamp = str(payload.get("timestamp") or payload.get("server_time") or "").strip()
+            if not (len(timestamp) == 14 and timestamp.isdigit()):
+                raise ValueError("timestamp/server_time must be YYYYMMDDHHMMSS for SET_TIME")
+            return f"TS {timestamp}"
+
+        if t == "REBOOT":
+            return "REBOOT"
         raise ValueError(f"Unsupported command_type: {command_type}")
+
+    def timeout_for_command(self, command_type: str) -> int:
+        t = (command_type or "").strip().upper()
+        if t in ("ENROLL_FINGER", "ENROLL", "ADD_FINGER"):
+            # Finger enrollment can take time because the user must place the finger on sensor.
+            return 90
+        if t in ("DELETE_FINGER", "DELETE", "REMOVE_FINGER"):
+            return 20
+        if t in ("SET_TIME", "SET_SERVER_TIME", "TIME", "GET_TIME"):
+            return 8
+        return 15
 
 
 class LaravelClient:
@@ -870,17 +905,33 @@ class SyncEngine:
             try:
                 if device_code and device_code != self.device.device_code:
                     raise RuntimeError("دستور برای دستگاه متصل فعلی نیست")
+
                 serial_command = self.serial_bridge.command_for_device(command_type, payload)
-                lines = self.serial_bridge.send_command(self.device.port, serial_command, timeout=10)
+                timeout = self.serial_bridge.timeout_for_command(command_type)
+                self.status(f"اجرای دستور سرور: {command_type}")
+                self.db.add_log("INFO", f"command pulled: {command_uuid} {device_code} {command_type} -> {serial_command}")
+
+                lines = self.serial_bridge.send_command(self.device.port, serial_command, timeout=timeout)
+                has_error = any(str(l).startswith("ERR") for l in lines)
+                has_response = bool(lines)
+                success = has_response and not has_error
+
                 result.update({
-                    "status": "success" if not any(l.startswith("ERR") for l in lines) else "failed",
+                    "status": "success" if success else "failed",
                     "serial_command": serial_command,
                     "serial_response": lines,
+                    "error_message": None if success else ("No response from device" if not has_response else "Device returned error"),
                 })
+                self.status(f"نتیجه دستور {command_type}: {'موفق' if success else 'ناموفق'}")
             except Exception as exc:
                 result["error_message"] = str(exc)
+                self.status(f"خطا در اجرای دستور سرور: {exc}")
+
             self.db.record_command_log(command_uuid, device_code, command_type, result["serial_command"], result["status"], result)
-            self.client.command_result(result)
+            try:
+                self.client.command_result(result)
+            except Exception as exc:
+                self.db.add_log("ERROR", f"command-result failed: {exc}")
 
 
 class HozoorApp(tk.Tk):
