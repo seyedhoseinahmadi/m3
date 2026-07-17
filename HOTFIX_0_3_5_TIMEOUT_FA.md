@@ -1,4 +1,4 @@
-# Hotfix 0.3.5 - API Timeout Fix
+# Hotfix 0.3.7 - API Timeout Fix
 
 ## مشکل
 

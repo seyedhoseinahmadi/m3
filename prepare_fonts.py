@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Prepare AFY fonts for Hozoor Sync build.
+Prepare AFY fonts for HiMate Sync build.
 
 This script does not include or download any font.
 If licensed font files are provided by project owner in assets/fonts as WOFF/WOFF2,

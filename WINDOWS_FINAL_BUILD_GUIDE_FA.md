@@ -49,7 +49,7 @@ Output\HozoorSyncCustomer_Setup.exe
 ## مسیر نصب
 
 ```text
-C:\Program Files\Avaye Farda\Hozoor Sync
+C:\Program Files\Avaye Farda\HiMate Sync
 ```
 
 ## مسیر داده‌ها

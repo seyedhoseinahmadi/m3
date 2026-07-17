@@ -1,4 +1,4 @@
-# Hotfix 0.3.5 - HTTP 422 Handling
+# Hotfix 0.3.7 - HTTP 422 Handling
 
 ## مشکل
 

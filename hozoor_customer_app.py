@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HiMate Sync - Customer Final Installer
-Version: CUSTOMER-FINAL-INSTALLER-0.3.6
+Version: CUSTOMER-FINAL-INSTALLER-0.3.7
 
 Rules:
 - Customer UI is clean and product-facing, not debug-facing.
@@ -57,7 +57,7 @@ try:
         BUILD_CHANNEL,
     )
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.6-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.7-DEV"
     APP_NAME = "HiMate Sync"
     SERVER_URL = "https://hozoor.example.com"
     SERVER_ID = "HOZOOR_MAIN"
@@ -593,7 +593,7 @@ class LaravelClient:
             headers["Authorization"] = f"Bearer {AGENT_TOKEN}"
         return headers
 
-    def post(self, endpoint_key: str, payload: Dict[str, Any], timeout: int = 15) -> Dict[str, Any]:
+    def post(self, endpoint_key: str, payload: Dict[str, Any], timeout: int = 30) -> Dict[str, Any]:
         if requests is None:
             raise RuntimeError("requests نصب نیست")
         endpoint = self.settings.get(endpoint_key, DEFAULT_SETTINGS[endpoint_key])
@@ -633,7 +633,7 @@ class LaravelClient:
             "hash_chain_ok": hash_ok,
             "hash_message": hash_msg,
             "time": utc_now(),
-        }, timeout=12)
+        }, timeout=30)
 
     def sync_events(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         return self.post("events_endpoint", {
@@ -653,7 +653,7 @@ class LaravelClient:
                     "record_hash": e["record_hash"],
                 } for e in events
             ],
-        }, timeout=20)
+        }, timeout=45)
 
     def restore_events(self, device_code: str = "") -> List[Dict[str, Any]]:
         data = self.post("restore_events_endpoint", {
@@ -661,7 +661,7 @@ class LaravelClient:
             "server_id": SERVER_ID,
             "pc_name": socket.gethostname(),
             "device_code": device_code,
-        }, timeout=20)
+        }, timeout=45)
         return data.get("restore_events", []) if data.get("ok") else []
 
     def restore_confirm(self, restored: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -670,7 +670,7 @@ class LaravelClient:
             "server_id": SERVER_ID,
             "pc_name": socket.gethostname(),
             "restored": [{"device_code": e["device_code"], "event_id": int(e["event_id"])} for e in restored],
-        }, timeout=20)
+        }, timeout=45)
 
     def pull_commands(self, device: Optional[DeviceInfo]) -> List[Dict[str, Any]]:
         data = self.post("pull_commands_endpoint", {
@@ -682,7 +682,7 @@ class LaravelClient:
                 "port": device.port,
                 "status": device.status,
             } if device else None,
-        }, timeout=15)
+        }, timeout=30)
         return data.get("commands", []) if data.get("ok") else []
 
     def command_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -777,14 +777,15 @@ class SyncEngine:
                 msg = str(exc)
                 if "Read timed out" in msg or "read timeout" in msg:
                     self.last_server_status = "کند / تایم‌اوت"
-                elif "Read timed out" in msg or "read timeout" in msg:
-                    self.last_server_status = "کند / تایم‌اوت"
+                    ui_msg = "پاسخ سرور کند است؛ برنامه دوباره تلاش می‌کند."
                 elif "HTTPConnectionPool" in msg or "HTTPSConnectionPool" in msg or "Max retries exceeded" in msg or "Failed to establish" in msg:
                     self.last_server_status = "قطع"
+                    ui_msg = "اتصال به سرور برقرار نشد؛ اینترنت، دامنه یا SSL را بررسی کنید."
                 else:
                     self.last_server_status = "خطا"
+                    ui_msg = msg
                 self.server_is_reachable = False
-                self.emit("error", msg)
+                self.emit("error", ui_msg)
             time.sleep(0.5)
 
     def run_once(self) -> None:
@@ -798,7 +799,12 @@ class SyncEngine:
             self.emit("refresh", None)
         except Exception as exc:
             self.db.add_log("ERROR", f"run_once: {exc}\n{traceback.format_exc()}")
-            self.emit("error", str(exc))
+            msg = str(exc)
+            if "Read timed out" in msg or "read timeout" in msg:
+                self.last_server_status = "کند / تایم‌اوت"
+                self.emit("error", "پاسخ سرور کند است؛ چند لحظه بعد دوباره امتحان کنید.")
+            else:
+                self.emit("error", msg)
 
     def detect_and_read(self) -> None:
         self.device = self.serial_bridge.detect_one_device()
@@ -1098,7 +1104,7 @@ class HozoorApp(tk.Tk):
         note.pack(fill="x", pady=(4, 0))
         tk.Label(
             note,
-            text="این نرم‌افزار برای اتصال یک دستگاه HiMate به سرور مرکزی استفاده می‌شود. لینک سرور داخل فایل نصب تنظیم شده و در صفحه مشتری نمایش داده نمی‌شود.",
+            text="این نرم‌افزار برای اتصال دستگاه HiMate به سرور مرکزی استفاده می‌شود. ارسال رکوردها خودکار انجام می‌شود.",
             bg=C_SURFACE, fg=C_TEXT, font=self.f_normal, wraplength=760, justify="right"
         ).pack(anchor="e", padx=16, pady=16)
 
@@ -1204,7 +1210,6 @@ class HozoorApp(tk.Tk):
                     self.status_var.set(str(data))
                 elif event == "error":
                     self.status_var.set(f"خطا: {data}")
-                    self.server_var.set("خطا")
                 elif event == "refresh":
                     self.refresh_ui()
         except queue.Empty:

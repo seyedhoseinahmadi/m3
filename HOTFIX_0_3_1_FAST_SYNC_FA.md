@@ -1,4 +1,4 @@
-# Hotfix 0.3.2 - Fast Auto Sync
+# Hotfix 0.3.7 - Fast Auto Sync
 
 ## مشکل
 

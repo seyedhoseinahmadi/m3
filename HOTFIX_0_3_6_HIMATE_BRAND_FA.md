@@ -1,8 +1,8 @@
-# Hotfix 0.3.6 - HiMate Branding
+# Hotfix 0.3.7 - HiMate Branding
 
 ## تغییر
 
-برند نمایشی نرم‌افزار از «حضور / Hozoor Sync» به «HiMate Sync» تغییر کرد.
+برند نمایشی نرم‌افزار از «حضور / HiMate Sync» به «HiMate Sync» تغییر کرد.
 
 ## مواردی که تغییر کردند
 

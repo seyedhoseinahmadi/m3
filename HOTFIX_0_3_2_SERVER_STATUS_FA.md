@@ -1,4 +1,4 @@
-# Hotfix 0.3.2 - Server Status Fix
+# Hotfix 0.3.7 - Server Status Fix
 
 ## مشکل
 
