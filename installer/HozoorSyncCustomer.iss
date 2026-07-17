@@ -1,9 +1,9 @@
-#define MyAppName "Hozoor Sync"
+#define MyAppName "HiMate Sync"
 #define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
 #if MyAppVersion == ""
 #define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
 #if MyAppVersion == ""
-#define MyAppVersion "0.3.2"
+#define MyAppVersion "0.3.6"
 #endif
 #endif
 #define MyAppPublisher "Avaye Farda Media"
@@ -18,8 +18,8 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={autopf}\Avaye Farda\Hozoor Sync
-DefaultGroupName=Avaye Farda\Hozoor Sync
+DefaultDirName={autopf}\Avaye Farda\HiMate Sync
+DefaultGroupName=Avaye Farda\HiMate Sync
 DisableProgramGroupPage=yes
 OutputDir=..\Output
 OutputBaseFilename=HozoorSyncCustomer_Setup
@@ -38,7 +38,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: checkedonce
-Name: "startup"; Description: "Run Hozoor Sync automatically when Windows starts"; GroupDescription: "Startup:"; Flags: checkedonce
+Name: "startup"; Description: "Run HiMate Sync automatically when Windows starts"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
 Source: "..\dist\HozoorSyncCustomer.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
@@ -50,15 +50,15 @@ Source: "..\VERSION.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\fonts\*"; DestDir: "{app}\assets\fonts"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
-Name: "{group}\Hozoor Sync"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\Uninstall Hozoor Sync"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Hozoor Sync"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\HiMate Sync"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\Uninstall HiMate Sync"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\HiMate Sync"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
-Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Hozoor Sync"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: startup
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "HiMate Sync"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch Hozoor Sync"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch HiMate Sync"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\HozoorSyncCustomer\temp"

@@ -1,11 +1,11 @@
-# Hozoor Sync - نسخه مشتری
+# HiMate Sync - نسخه مشتری
 
-نرم‌افزار ویندوز برای اتصال یک دستگاه حضور به سرور مرکزی حضور.
+نرم‌افزار ویندوز برای اتصال یک دستگاه HiMate به سرور مرکزی HiMate.
 
 ## مسیر اصلی
 
 ```text
-Device → USB/Serial → Hozoor Sync → Laravel Central Server
+Device → USB/Serial → HiMate Sync → Laravel Central Server
 ```
 
 ## مدل تجاری

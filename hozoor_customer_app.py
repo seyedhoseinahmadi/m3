@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Hozoor Sync - Customer Final Installer
-Version: CUSTOMER-FINAL-INSTALLER-0.3.4
+HiMate Sync - Customer Final Installer
+Version: CUSTOMER-FINAL-INSTALLER-0.3.6
 
 Rules:
 - Customer UI is clean and product-facing, not debug-facing.
 - One active device is handled at a time.
-- App is server-bound to the central Hozoor VPS, not device-bound.
+- App is server-bound to the central HiMate VPS, not device-bound.
 - device_code is read from hardware and Laravel maps it to customer/branch.
 - No internal database/log paths are exposed in the public UI.
 - Auto refresh and auto sync are always handled in background.
@@ -57,8 +57,8 @@ try:
         BUILD_CHANNEL,
     )
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.4-DEV"
-    APP_NAME = "Hozoor Sync"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.6-DEV"
+    APP_NAME = "HiMate Sync"
     SERVER_URL = "https://hozoor.example.com"
     SERVER_ID = "HOZOOR_MAIN"
     AGENT_TOKEN = ""
@@ -593,7 +593,7 @@ class LaravelClient:
             headers["Authorization"] = f"Bearer {AGENT_TOKEN}"
         return headers
 
-    def post(self, endpoint_key: str, payload: Dict[str, Any], timeout: int = 6) -> Dict[str, Any]:
+    def post(self, endpoint_key: str, payload: Dict[str, Any], timeout: int = 15) -> Dict[str, Any]:
         if requests is None:
             raise RuntimeError("requests نصب نیست")
         endpoint = self.settings.get(endpoint_key, DEFAULT_SETTINGS[endpoint_key])
@@ -633,7 +633,7 @@ class LaravelClient:
             "hash_chain_ok": hash_ok,
             "hash_message": hash_msg,
             "time": utc_now(),
-        }, timeout=4)
+        }, timeout=12)
 
     def sync_events(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
         return self.post("events_endpoint", {
@@ -653,7 +653,7 @@ class LaravelClient:
                     "record_hash": e["record_hash"],
                 } for e in events
             ],
-        }, timeout=8)
+        }, timeout=20)
 
     def restore_events(self, device_code: str = "") -> List[Dict[str, Any]]:
         data = self.post("restore_events_endpoint", {
@@ -661,7 +661,7 @@ class LaravelClient:
             "server_id": SERVER_ID,
             "pc_name": socket.gethostname(),
             "device_code": device_code,
-        }, timeout=8)
+        }, timeout=20)
         return data.get("restore_events", []) if data.get("ok") else []
 
     def restore_confirm(self, restored: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -670,7 +670,7 @@ class LaravelClient:
             "server_id": SERVER_ID,
             "pc_name": socket.gethostname(),
             "restored": [{"device_code": e["device_code"], "event_id": int(e["event_id"])} for e in restored],
-        })
+        }, timeout=20)
 
     def pull_commands(self, device: Optional[DeviceInfo]) -> List[Dict[str, Any]]:
         data = self.post("pull_commands_endpoint", {
@@ -682,13 +682,13 @@ class LaravelClient:
                 "port": device.port,
                 "status": device.status,
             } if device else None,
-        })
+        }, timeout=15)
         return data.get("commands", []) if data.get("ok") else []
 
     def command_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         payload = dict(result)
         payload.update({"agent_version": APP_VERSION, "server_id": SERVER_ID, "pc_name": socket.gethostname()})
-        return self.post("command_result_endpoint", payload)
+        return self.post("command_result_endpoint", payload, timeout=20)
 
 
 class SyncEngine:
@@ -775,7 +775,11 @@ class SyncEngine:
             except Exception as exc:
                 self.db.add_log("ERROR", f"loop: {exc}")
                 msg = str(exc)
-                if "HTTPConnectionPool" in msg or "HTTPSConnectionPool" in msg or "Max retries exceeded" in msg or "Failed to establish" in msg:
+                if "Read timed out" in msg or "read timeout" in msg:
+                    self.last_server_status = "کند / تایم‌اوت"
+                elif "Read timed out" in msg or "read timeout" in msg:
+                    self.last_server_status = "کند / تایم‌اوت"
+                elif "HTTPConnectionPool" in msg or "HTTPSConnectionPool" in msg or "Max retries exceeded" in msg or "Failed to establish" in msg:
                     self.last_server_status = "قطع"
                 else:
                     self.last_server_status = "خطا"
@@ -938,7 +942,7 @@ class HozoorApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.font_family = choose_font(self)
-        self.title("حضور | Hozoor Sync")
+        self.title("HiMate Sync")
         self.geometry("1040x660")
         self.minsize(920, 600)
         self.configure(bg=C_BG)
@@ -1007,8 +1011,8 @@ class HozoorApp(tk.Tk):
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
 
-        tk.Label(header, text="حضور | Hozoor Sync", bg=C_DARK, fg="white", font=self.f_title).pack(side="right", padx=24)
-        tk.Label(header, text="اتصال دستگاه حضور به سرور مرکزی", bg=C_DARK, fg="#E5E7EB", font=self.f_normal).pack(side="left", padx=24)
+        tk.Label(header, text="HiMate Sync", bg=C_DARK, fg="white", font=self.f_title).pack(side="right", padx=24)
+        tk.Label(header, text="اتصال دستگاه HiMate به سرور مرکزی", bg=C_DARK, fg="#E5E7EB", font=self.f_normal).pack(side="left", padx=24)
 
         body = tk.Frame(self, bg=C_BG)
         body.pack(fill="both", expand=True)
@@ -1094,7 +1098,7 @@ class HozoorApp(tk.Tk):
         note.pack(fill="x", pady=(4, 0))
         tk.Label(
             note,
-            text="این نرم‌افزار برای اتصال یک دستگاه حضور به سرور مرکزی استفاده می‌شود. لینک سرور داخل فایل نصب تنظیم شده و در صفحه مشتری نمایش داده نمی‌شود.",
+            text="این نرم‌افزار برای اتصال یک دستگاه HiMate به سرور مرکزی استفاده می‌شود. لینک سرور داخل فایل نصب تنظیم شده و در صفحه مشتری نمایش داده نمی‌شود.",
             bg=C_SURFACE, fg=C_TEXT, font=self.f_normal, wraplength=760, justify="right"
         ).pack(anchor="e", padx=16, pady=16)
 
@@ -1170,7 +1174,7 @@ class HozoorApp(tk.Tk):
         public_info = [
             ("نسخه نرم‌افزار", APP_VERSION),
             ("وضعیت نصب", "فعال"),
-            ("مرکز اتصال", "سرور مرکزی حضور"),
+            ("مرکز اتصال", "سرور مرکزی HiMate"),
             ("فونت فعال", self.font_family),
         ]
         for label, value in public_info:
@@ -1274,7 +1278,7 @@ class HozoorApp(tk.Tk):
         target = filedialog.asksaveasfilename(
             defaultextension=".log",
             filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")],
-            initialfile="hozoor_support_report.log",
+            initialfile="himate_support_report.log",
         )
         if not target:
             return
@@ -1286,7 +1290,7 @@ class HozoorApp(tk.Tk):
             messagebox.showerror("خطا", str(exc))
 
     def about(self) -> None:
-        messagebox.showinfo("حضور", f"حضور | Hozoor Sync\n{APP_VERSION}\nAvaye Farda Media")
+        messagebox.showinfo("HiMate", f"HiMate Sync\n{APP_VERSION}\nAvaye Farda Media")
 
 
 def main() -> int:

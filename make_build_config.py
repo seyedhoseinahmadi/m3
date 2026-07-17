@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse, os
 from pathlib import Path
 
-APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.4"
+APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.6"
 
 def clean_url(url: str) -> str:
     url = (url or "").strip().rstrip("/")
@@ -25,7 +25,7 @@ def main() -> int:
 
     if not args.non_interactive:
         print()
-        print("Hozoor Customer Final UI Build Config")
+        print("HiMate Customer Final UI Build Config")
         print("--------------------------------------")
         print("Server URL is compiled into EXE and is not editable in customer build.")
         print("Windows app is NOT locked to a device. Device code is read from device.")
@@ -39,8 +39,8 @@ def main() -> int:
 
     server_url = clean_url(server_url)
     content = f'''# -*- coding: utf-8 -*-
-APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.4"
-APP_NAME = "Hozoor Sync"
+APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.6"
+APP_NAME = "HiMate Sync"
 SERVER_URL = {server_url!r}
 SERVER_ID = {server_id!r}
 AGENT_TOKEN = {token!r}

@@ -1,4 +1,4 @@
-# Hozoor Sync - نسخه نهایی Installer مشتری
+# HiMate Sync - نسخه نهایی Installer مشتری
 
 نسخه:
 
@@ -20,7 +20,7 @@ HozoorSyncCustomer_Setup.exe
 بعد از نصب:
 
 ```text
-C:\Program Files\Avaye Farda\Hozoor Sync\HozoorSyncCustomer.exe
+C:\Program Files\Avaye Farda\HiMate Sync\HozoorSyncCustomer.exe
 ```
 
 داده‌ها، دیتابیس و لاگ‌ها در AppData ذخیره می‌شوند:
