@@ -4,11 +4,22 @@
   #define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
 #endif
 #if MyAppVersion == ""
-  #define MyAppVersion "0.4.5"
+  #define MyAppVersion "0.4.8"
 #endif
 #define MyAppPublisher "Avaye Farda Media"
 #define MyAppURL "https://avayefardamedia.com"
 #define MyAppExeName "HiMateSync.exe"
+
+; Resolve the actual EXE at compile time. Only the existing source is emitted into [Files].
+#if FileExists(SourcePath + "\..\dist\HiMateSync.exe")
+  #define MyAppExeSource "..\dist\HiMateSync.exe"
+#elif FileExists(SourcePath + "\..\Output\HiMateSync.exe")
+  #define MyAppExeSource "..\Output\HiMateSync.exe"
+#elif FileExists(SourcePath + "\..\dist\HozoorSyncCustomer.exe")
+  #define MyAppExeSource "..\dist\HozoorSyncCustomer.exe"
+#else
+  #error "HiMate executable was not found. Build the EXE before compiling Setup."
+#endif
 
 [Setup]
 ; Original AppId is intentionally preserved so this build upgrades the existing app.
@@ -46,14 +57,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Name: "startup"; Description: "Run HiMate Sync automatically when Windows starts"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
-; Compatibility inputs:
-; - New workflow/local build: dist\HiMateSync.exe
-; - Previous 0.4.4 workflow: Output\HiMateSync.exe
-; - Original GitHub workflow: dist\HozoorSyncCustomer.exe
-; Missing alternatives are ignored, so either old or new GitHub workflow can compile this installer.
-Source: "..\Output\HiMateSync.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "..\dist\HiMateSync.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "..\dist\HozoorSyncCustomer.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#MyAppExeSource}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 Source: "..\README_INSTALLER_FA.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\README_MARKET_PRODUCT_FA.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\UI_FINAL_GUIDE_FA.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist

@@ -1,48 +1,76 @@
 # -*- coding: utf-8 -*-
 """
-Prepare AFY fonts for HiMate Sync build.
+Prepare licensed AFY/IRANYekanWeb fonts for the HiMate Windows build.
 
-This script does not include or download any font.
-If licensed font files are provided by project owner in assets/fonts as WOFF/WOFF2,
-it tries to convert them to TTF so Windows/Tkinter can load them.
+Expected source files in assets/fonts:
+- AFYRegular.woff2 or AFYRegular.woff
+- AFYBold.woff2 or AFYBold.woff
 
-Input examples:
-- assets/fonts/AFYRegular.woff2
-- assets/fonts/AFYBold.woff2
+Generated Windows font files:
+- AFYRegular.ttf
+- AFYBold.ttf
 
-Output examples:
-- assets/fonts/AFYRegular.ttf
-- assets/fonts/AFYBold.ttf
+The actual family name inside the supplied fonts is IRANYekanWeb.
 """
 
 from pathlib import Path
+import sys
 
 FONTS_DIR = Path("assets") / "fonts"
+REQUIRED = {
+    "AFYRegular.ttf": ["AFYRegular.woff2", "AFYRegular.woff"],
+    "AFYBold.ttf": ["AFYBold.woff2", "AFYBold.woff"],
+}
+
+
+def convert_font(src: Path, out: Path) -> None:
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(str(src))
+    font.flavor = None
+    font.save(str(out))
 
 
 def main() -> int:
     FONTS_DIR.mkdir(parents=True, exist_ok=True)
+
     try:
-        from fontTools.ttLib import TTFont
-    except Exception:
-        print("fontTools is not available; skipping font conversion.")
-        return 0
+        import fontTools  # noqa: F401
+    except Exception as exc:
+        print(f"ERROR: fontTools is not available: {exc}")
+        return 1
 
-    converted = 0
-    for src in list(FONTS_DIR.glob("*.woff")) + list(FONTS_DIR.glob("*.woff2")):
-        out = src.with_suffix(".ttf")
-        if out.exists():
+    missing_sources = []
+    for output_name, candidates in REQUIRED.items():
+        source = next((FONTS_DIR / name for name in candidates if (FONTS_DIR / name).exists()), None)
+        if source is None:
+            missing_sources.append(" or ".join(candidates))
             continue
-        try:
-            font = TTFont(str(src))
-            font.flavor = None
-            font.save(str(out))
-            print(f"Converted {src} -> {out}")
-            converted += 1
-        except Exception as exc:
-            print(f"Could not convert {src}: {exc}")
 
-    print(f"Font conversion done. Converted: {converted}")
+        output = FONTS_DIR / output_name
+        try:
+            if output.exists():
+                output.unlink()
+            convert_font(source, output)
+            print(f"Converted {source} -> {output}")
+        except Exception as exc:
+            print(f"ERROR: Could not convert {source}: {exc}")
+            return 1
+
+    if missing_sources:
+        print("ERROR: Required licensed font source files are missing:")
+        for item in missing_sources:
+            print(f" - {item}")
+        return 1
+
+    missing_outputs = [name for name in REQUIRED if not (FONTS_DIR / name).exists()]
+    if missing_outputs:
+        print("ERROR: Font conversion did not create:")
+        for name in missing_outputs:
+            print(f" - assets/fonts/{name}")
+        return 1
+
+    print("Font preparation completed successfully.")
     return 0
 
 

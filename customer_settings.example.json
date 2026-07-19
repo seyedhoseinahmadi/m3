@@ -17,5 +17,10 @@
   "directory_users_endpoint": "/api/users",
   "directory_branches_endpoint": "/api/branches",
   "directory_devices_endpoint": "/api/devices",
-  "directory_register_endpoint": "/api/fingerprints/registe"
+  "directory_register_endpoint": "/api/fingerprints/registe",
+  "device_branch_endpoint": "/api/hozoor/agent/device-branch",
+  "selected_branch_id": "",
+  "selected_device_id": "",
+  "selected_device_code": "",
+  "selected_device_title": ""
 }

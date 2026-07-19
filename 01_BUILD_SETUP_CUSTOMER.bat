@@ -7,7 +7,7 @@ set "LEGACY_SETUP=HozoorSyncCustomer_Setup.exe"
 set "FINAL_SETUP=HiMateSync_Setup.exe"
 
 echo ================================================
-echo HiMate Windows Setup Builder 0.4.5
+echo HiMate Windows Setup Builder 0.4.8
 echo ================================================
 
 if not exist "hozoor_customer_app.py" (
@@ -34,7 +34,13 @@ if errorlevel 1 goto :failed
 python -m pip install -r requirements.txt
 if errorlevel 1 goto :failed
 
-if exist prepare_fonts.py python prepare_fonts.py
+python prepare_fonts.py
+if errorlevel 1 (
+    echo ERROR: Required AFY font files are missing or invalid.
+    goto :failed
+)
+if not exist "assets\fonts\AFYRegular.ttf" goto :font_failed
+if not exist "assets\fonts\AFYBold.ttf" goto :font_failed
 
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
@@ -58,8 +64,8 @@ if not exist "%ISCC%" (
     exit /b 1
 )
 
-set "HIMATE_APP_VERSION=0.4.5"
-set "HOZOOR_APP_VERSION=0.4.5"
+set "HIMATE_APP_VERSION=0.4.8"
+set "HOZOOR_APP_VERSION=0.4.8"
 "%ISCC%" "installer\HozoorSyncCustomer.iss"
 if errorlevel 1 goto :failed
 
@@ -76,6 +82,10 @@ echo SUCCESS:
 echo %cd%\Output\%FINAL_SETUP%
 pause
 exit /b 0
+
+:font_failed
+echo ERROR: Required bundled Windows font was not generated.
+goto :failed
 
 :failed
 echo.

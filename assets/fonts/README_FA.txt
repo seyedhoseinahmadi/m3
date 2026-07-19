@@ -1,21 +1,22 @@
-# فونت AFY
+# فونت رابط کاربری HiMate
 
-فایل فونت داخل این پکیج قرار داده نشده است.
+فایل‌های فونت مجاز را پیش از Build در همین پوشه قرار دهید:
 
-برای اینکه برنامه با فونت AFY ساخته شود، خودتان یکی از حالت‌های زیر را داخل همین پوشه در GitHub بگذارید:
+- AFYRegular.woff2
+- AFYBold.woff2
 
-```text
-assets/fonts/AFYRegular.ttf
-assets/fonts/AFYBold.ttf
-```
+نسخه‌های WOFF نیز پشتیبانی می‌شوند:
 
-یا اگر فقط WOFF/WOFF2 دارید:
+- AFYRegular.woff
+- AFYBold.woff
 
-```text
-assets/fonts/AFYRegular.woff2
-assets/fonts/AFYBold.woff2
-```
+اسکریپت prepare_fonts.py قبل از Build آن‌ها را به این فایل‌های ویندوزی تبدیل می‌کند:
 
-در زمان Build، اسکریپت `prepare_fonts.py` تلاش می‌کند WOFF/WOFF2 را به TTF تبدیل کند.
+- AFYRegular.ttf
+- AFYBold.ttf
 
-اگر فونت موجود نباشد، برنامه از Segoe UI / Tahoma استفاده می‌کند.
+نام واقعی Family داخل این فونت‌ها:
+IRANYekanWeb
+
+Build در صورت نبودن فونت‌ها متوقف می‌شود تا هیچ نسخه‌ای با Tahoma یا Segoe UI منتشر نشود.
+فونت به‌صورت خصوصی از پوشه نصب برنامه Load می‌شود و لازم نیست روی ویندوز مشتری نصب باشد.

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HiMate Sync - Customer Final Installer
-Version: CUSTOMER-FINAL-INSTALLER-0.4.3
+Version: CUSTOMER-FINAL-INSTALLER-0.4.7
 
 Rules:
 - Customer UI is clean and product-facing, not debug-facing.
@@ -51,19 +51,19 @@ from tkinter import font as tkfont
 try:
     import hozoor_customer_build_config as build_config
 
-    APP_VERSION = getattr(build_config, "APP_VERSION", "CUSTOMER-FINAL-INSTALLER-0.4.3-DEV")
+    APP_VERSION = getattr(build_config, "APP_VERSION", "CUSTOMER-FINAL-INSTALLER-0.4.7-DEV")
     APP_NAME = getattr(build_config, "APP_NAME", "HiMate Sync")
     SERVER_URL = getattr(build_config, "SERVER_URL", "https://hozoor.example.com")
-    SERVER_ID = getattr(build_config, "SERVER_ID", "HOZOOR_MAIN")
+    SERVER_ID = str(getattr(build_config, "SERVER_ID", "")).strip()
     AGENT_TOKEN = getattr(build_config, "AGENT_TOKEN", "")
     BUILD_CHANNEL = getattr(build_config, "BUILD_CHANNEL", "dev")
     DIRECTORY_API_URL = getattr(build_config, "DIRECTORY_API_URL", "https://mangroup.ir")
     DIRECTORY_API_TOKEN = getattr(build_config, "DIRECTORY_API_TOKEN", "")
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.4.3-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.4.7-DEV"
     APP_NAME = "HiMate Sync"
     SERVER_URL = "https://hozoor.example.com"
-    SERVER_ID = "HOZOOR_MAIN"
+    SERVER_ID = ""
     AGENT_TOKEN = ""
     BUILD_CHANNEL = "dev"
     DIRECTORY_API_URL = "https://mangroup.ir"
@@ -83,6 +83,11 @@ DEFAULT_SETTINGS = {
     "max_batch_size": 100,
     "preferred_port": "",
     "events_endpoint": "/api/hozoor/events/batch",
+    "device_branch_endpoint": "/api/hozoor/agent/device-branch",
+    "selected_branch_id": "",
+    "selected_device_id": "",
+    "selected_device_code": "",
+    "selected_device_title": "",
     "heartbeat_endpoint": "/api/hozoor/agent/heartbeat",
     "pull_commands_endpoint": "/api/hozoor/agent/pull-commands",
     "command_result_endpoint": "/api/hozoor/agent/command-result",
@@ -207,6 +212,9 @@ def choose_font(root: tk.Tk) -> str:
 
     families = set(tkfont.families(root))
     for fam in [
+        # The supplied AFY files identify their actual Windows family as IRANYekanWeb.
+        "IRANYekanWeb",
+        "IRANYekanWeb Bold",
         "AFY",
         "AFYRegular",
         "AFY Regular",
@@ -769,24 +777,31 @@ class LaravelClient:
         }, timeout=30)
 
     def sync_events(self, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Send the exact attendance batch contract expected by Laravel.
+
+        Deliberately excludes local-only fields such as raw_line, source and record_hash.
+        """
         return self.post("events_endpoint", {
-            "agent_version": APP_VERSION,
             "server_id": SERVER_ID,
-            "source": "serial_agent",
             "pc_name": socket.gethostname(),
+            "agent_version": APP_VERSION,
             "events": [
                 {
-                    "device_code": e["device_code"],
+                    "device_code": str(e["device_code"]),
                     "event_id": int(e["event_id"]),
                     "finger_id": int(e["finger_id"]),
-                    "event_time": e["event_time"],
+                    "event_time": str(e["event_time"]),
                     "time_valid": int(e["time_valid"]),
-                    "raw_line": e["raw_line"],
-                    "source": e["source"],
-                    "record_hash": e["record_hash"],
                 } for e in events
             ],
         }, timeout=45)
+
+    def save_device_branch(self, device_id: int, branch_id: int) -> Dict[str, Any]:
+        """Persist the Windows assignment using only device_id and branch_id."""
+        return self.post("device_branch_endpoint", {
+            "device_id": int(device_id),
+            "branch_id": int(branch_id),
+        }, timeout=30)
 
     def restore_events(self, device_code: str = "") -> List[Dict[str, Any]]:
         data = self.post("restore_events_endpoint", {
@@ -1362,17 +1377,21 @@ class HozoorApp(tk.Tk):
         self.enroll_window: Optional[tk.Toplevel] = None
         self.enroll_status_var = tk.StringVar(value="")
 
-        # Direct fingerprint enrollment UI state.
+        # Directory data and direct fingerprint enrollment UI state.
         self.directory_branches: List[Dict[str, Any]] = []
         self.directory_users: List[Dict[str, Any]] = []
         self.directory_devices: List[Dict[str, Any]] = []
         self.filtered_users: List[Dict[str, Any]] = []
-        self.filtered_devices: List[Dict[str, Any]] = []
-        self.fp_branch_var = tk.StringVar(value="")
+
+        # Branch/device are selected once in Settings, not during enrollment.
+        self.settings_branch_var = tk.StringVar(value="")
+        self.settings_device_var = tk.StringVar(value="")
+        self.settings_assignment_status_var = tk.StringVar(value="شعبه و دستگاه را انتخاب و ذخیره کنید.")
+        self.fp_configured_device_var = tk.StringVar(value="در تنظیمات انتخاب نشده است")
+
         self.fp_user_var = tk.StringVar(value="")
-        self.fp_device_var = tk.StringVar(value="")
         self.fp_finger_id_var = tk.StringVar(value="")
-        self.fp_status_var = tk.StringVar(value="برای شروع، فهرست‌ها را دریافت کنید.")
+        self.fp_status_var = tk.StringVar(value="برای شروع، فهرست افراد را دریافت کنید.")
 
         self.setup_base_fonts()
         self.build_ui()
@@ -1524,12 +1543,12 @@ class HozoorApp(tk.Tk):
         self.section_title(
             parent,
             "ثبت اثر انگشت",
-            "فرد و دستگاه را از فهرست سرور انتخاب کنید؛ ثبت روی سنسور مستقیم از همین کامپیوتر انجام می‌شود.",
+            "شعبه و دستگاه از تب تنظیمات خوانده می‌شوند؛ اینجا فقط فرد و کد اثر انگشت انتخاب می‌شود.",
         )
 
         actions = tk.Frame(parent, bg=C_BG)
         actions.pack(fill="x", pady=(0, 12))
-        self.primary_button(actions, "دریافت فهرست‌ها", self.refresh_directory_data_async).pack(side="right")
+        self.primary_button(actions, "دریافت فهرست افراد", self.refresh_directory_data_async).pack(side="right")
 
         form = tk.Frame(parent, bg=C_SURFACE, highlightthickness=1, highlightbackground=C_LINE)
         form.pack(fill="x")
@@ -1540,25 +1559,31 @@ class HozoorApp(tk.Tk):
             tk.Label(row, text=label, bg=C_SURFACE, fg=C_TEXT, font=self.f_bold, width=18, anchor="e").pack(side="right")
             widget.pack(side="right", fill="x", expand=True, padx=(12, 0))
 
-        self.fp_branch_combo = ttk.Combobox(form, textvariable=self.fp_branch_var, state="readonly", justify="right", width=55)
+        configured_device = tk.Label(
+            form,
+            textvariable=self.fp_configured_device_var,
+            bg="#F8F8F8",
+            fg=C_TEXT,
+            font=self.f_bold,
+            anchor="e",
+            padx=10,
+            pady=8,
+        )
         self.fp_user_combo = ttk.Combobox(form, textvariable=self.fp_user_var, state="readonly", justify="right", width=55)
-        self.fp_device_combo = ttk.Combobox(form, textvariable=self.fp_device_var, state="readonly", justify="right", width=55)
         self.fp_finger_entry = tk.Entry(form, textvariable=self.fp_finger_id_var, justify="right", font=self.f_normal, bd=1, relief="solid")
 
-        add_row("شعبه", self.fp_branch_combo)
+        add_row("دستگاه تنظیم‌شده", configured_device)
         add_row("فرد", self.fp_user_combo)
-        add_row("دستگاه", self.fp_device_combo)
         add_row("کد اثر انگشت", self.fp_finger_entry)
-
-        self.fp_branch_combo.bind("<<ComboboxSelected>>", lambda _e: self.apply_directory_filters())
 
         notice = tk.Frame(parent, bg="#FFF8E7", highlightthickness=1, highlightbackground="#F0D59A")
         notice.pack(fill="x", pady=14)
         tk.Label(
             notice,
             text=(
-                "شعبه فقط برای فیلتر فهرست‌هاست. پس از فشردن «شروع ثبت»، برنامه دستور را مستقیم به دستگاه متصل می‌فرستد. "
-                "فقط بعد از پاسخ موفق سنسور، دقیقاً username، device_id، device_code و finger_id در Laravel ثبت می‌شود."
+                "انتخاب شعبه و دستگاه فقط یک‌بار در تب تنظیمات انجام می‌شود. پس از فشردن «شروع ثبت»، "
+                "برنامه دستور را مستقیم به دستگاه تنظیم‌شده می‌فرستد و پس از موفقیت سنسور، "
+                "username، device_id، device_code و finger_id را برای API ثبت اثر انگشت ارسال می‌کند."
             ),
             bg="#FFF8E7", fg=C_TEXT, font=self.f_normal, wraplength=820, justify="right",
         ).pack(anchor="e", padx=16, pady=13)
@@ -1566,10 +1591,20 @@ class HozoorApp(tk.Tk):
         bottom = tk.Frame(parent, bg=C_BG)
         bottom.pack(fill="x")
         self.primary_button(bottom, "شروع ثبت اثر انگشت", self.start_direct_enrollment).pack(side="right")
+        self.secondary_button(bottom, "پیشنهاد کد آزاد", self.suggest_finger_id_async).pack(side="right", padx=8)
         tk.Label(bottom, textvariable=self.fp_status_var, bg=C_BG, fg=C_MUTED, font=self.f_small, justify="right").pack(side="right", padx=14)
 
+    @staticmethod
+    def _branch_label(item: Dict[str, Any]) -> str:
+        return f"{item['title']}  |  ID {item['id']}"
+
+    @staticmethod
+    def _device_label(item: Dict[str, Any]) -> str:
+        return f"{item['title']} • {item['device_code']}  |  ID {item['id']}"
+
     def refresh_directory_data_async(self) -> None:
-        self.fp_status_var.set("در حال دریافت فهرست شعبه‌ها، افراد و دستگاه‌ها...")
+        self.fp_status_var.set("در حال دریافت فهرست افراد، شعبه‌ها و دستگاه‌ها...")
+        self.settings_assignment_status_var.set("در حال دریافت فهرست شعبه‌ها و دستگاه‌ها...")
         threading.Thread(target=self._refresh_directory_data_worker, daemon=True).start()
 
     def _refresh_directory_data_worker(self) -> None:
@@ -1588,34 +1623,68 @@ class HozoorApp(tk.Tk):
                 "ok": False,
                 "message": f"دریافت فهرست‌ها ناموفق بود: {exc}",
             }))
+            self.ui_queue.put(("device_branch_status", {
+                "ok": False,
+                "message": f"دریافت فهرست‌ها ناموفق بود: {exc}",
+            }))
 
     def apply_directory_data(self, data: Dict[str, Any]) -> None:
         self.directory_branches = list(data.get("branches") or [])
         self.directory_users = list(data.get("users") or [])
         self.directory_devices = list(data.get("devices") or [])
 
-        branch_values = [f"{item['title']}  |  ID {item['id']}" for item in self.directory_branches]
-        self.fp_branch_combo["values"] = branch_values
+        branch_values = [self._branch_label(item) for item in self.directory_branches]
+        device_values = [self._device_label(item) for item in self.directory_devices]
+        if hasattr(self, "settings_branch_combo"):
+            self.settings_branch_combo["values"] = branch_values
+        if hasattr(self, "settings_device_combo"):
+            self.settings_device_combo["values"] = device_values
 
-        active_code = str(self.device_code_var.get() or "").strip()
-        active_device = next((item for item in self.directory_devices if item["device_code"] == active_code), None)
-        if active_device and active_device.get("branch_id"):
-            branch = next((item for item in self.directory_branches if int(item["id"]) == int(active_device["branch_id"])), None)
-            if branch:
-                self.fp_branch_var.set(f"{branch['title']}  |  ID {branch['id']}")
-        elif len(self.directory_branches) == 1:
-            item = self.directory_branches[0]
-            self.fp_branch_var.set(f"{item['title']}  |  ID {item['id']}")
+        settings = read_json(SETTINGS_PATH, DEFAULT_SETTINGS)
+        saved_branch_id = settings.get("selected_branch_id")
+        saved_device_id = settings.get("selected_device_id")
 
-        self.apply_directory_filters()
-        self.fp_status_var.set(
-            f"{len(self.directory_users)} فرد، {len(self.directory_branches)} شعبه و {len(self.directory_devices)} دستگاه دریافت شد."
+        saved_branch = next(
+            (item for item in self.directory_branches if str(item["id"]) == str(saved_branch_id)),
+            None,
+        )
+        saved_device = next(
+            (item for item in self.directory_devices if str(item["id"]) == str(saved_device_id)),
+            None,
         )
 
-    def _selected_branch(self) -> Optional[Dict[str, Any]]:
-        value = self.fp_branch_var.get()
+        if saved_branch:
+            self.settings_branch_var.set(self._branch_label(saved_branch))
+        elif len(self.directory_branches) == 1:
+            self.settings_branch_var.set(self._branch_label(self.directory_branches[0]))
+
+        if saved_device:
+            self.settings_device_var.set(self._device_label(saved_device))
+        else:
+            active_code = str(self.device_code_var.get() or "").strip()
+            active_device = next((item for item in self.directory_devices if item["device_code"] == active_code), None)
+            if active_device:
+                self.settings_device_var.set(self._device_label(active_device))
+            elif len(self.directory_devices) == 1:
+                self.settings_device_var.set(self._device_label(self.directory_devices[0]))
+
+        self.apply_directory_filters()
+        self.settings_assignment_status_var.set(
+            f"{len(self.directory_branches)} شعبه و {len(self.directory_devices)} دستگاه دریافت شد."
+        )
+        self.fp_status_var.set(f"{len(self.filtered_users)} فرد برای شعبه تنظیم‌شده آماده انتخاب است.")
+
+    def _selected_settings_branch(self) -> Optional[Dict[str, Any]]:
+        value = self.settings_branch_var.get()
         for item in self.directory_branches:
-            if value == f"{item['title']}  |  ID {item['id']}":
+            if value == self._branch_label(item):
+                return item
+        return None
+
+    def _selected_settings_device(self) -> Optional[Dict[str, Any]]:
+        value = self.settings_device_var.get()
+        for item in self.directory_devices:
+            if value == self._device_label(item):
                 return item
         return None
 
@@ -1627,49 +1696,61 @@ class HozoorApp(tk.Tk):
                 return item
         return None
 
-    def _selected_directory_device(self) -> Optional[Dict[str, Any]]:
-        value = self.fp_device_var.get()
-        for item in self.filtered_devices:
-            if value == f"{item['title']} • {item['device_code']}  |  ID {item['id']}":
-                return item
+    def _configured_device(self) -> Optional[Dict[str, Any]]:
+        selected = self._selected_settings_device()
+        if selected:
+            return selected
+
+        settings = read_json(SETTINGS_PATH, DEFAULT_SETTINGS)
+        saved_id = settings.get("selected_device_id")
+        if saved_id not in (None, ""):
+            found = next((item for item in self.directory_devices if str(item["id"]) == str(saved_id)), None)
+            if found:
+                return found
+            saved_code = str(settings.get("selected_device_code") or "").strip()
+            if saved_code:
+                return {
+                    "id": int(saved_id),
+                    "device_code": saved_code,
+                    "title": str(settings.get("selected_device_title") or saved_code),
+                    "branch_id": settings.get("selected_branch_id"),
+                }
         return None
 
     def apply_directory_filters(self) -> None:
-        branch = self._selected_branch()
+        branch = self._selected_settings_branch()
+        settings = read_json(SETTINGS_PATH, DEFAULT_SETTINGS)
         branch_id = int(branch["id"]) if branch else None
+        if branch_id is None and settings.get("selected_branch_id") not in (None, ""):
+            try:
+                branch_id = int(settings.get("selected_branch_id"))
+            except (TypeError, ValueError):
+                branch_id = None
 
         def belongs(item: Dict[str, Any]) -> bool:
             value = item.get("branch_id")
             return branch_id is None or value in (None, "") or int(value) == branch_id
 
         self.filtered_users = [item for item in self.directory_users if belongs(item)]
-        self.filtered_devices = [item for item in self.directory_devices if belongs(item)]
-
         user_values = []
         for item in self.filtered_users:
             code = f" • {item['employee_code']}" if item.get("employee_code") else ""
             user_values.append(f"{item['name']}{code}  |  {item['username']}")
-        self.fp_user_combo["values"] = user_values
+        if hasattr(self, "fp_user_combo"):
+            self.fp_user_combo["values"] = user_values
         if self.fp_user_var.get() not in user_values:
             self.fp_user_var.set(user_values[0] if len(user_values) == 1 else "")
 
-        device_values = [
-            f"{item['title']} • {item['device_code']}  |  ID {item['id']}"
-            for item in self.filtered_devices
-        ]
-        self.fp_device_combo["values"] = device_values
-
-        active_code = str(self.device_code_var.get() or "").strip()
-        active = next((item for item in self.filtered_devices if item["device_code"] == active_code), None)
-        if active:
-            self.fp_device_var.set(f"{active['title']} • {active['device_code']}  |  ID {active['id']}")
-        elif self.fp_device_var.get() not in device_values:
-            self.fp_device_var.set(device_values[0] if len(device_values) == 1 else "")
+        device = self._configured_device()
+        if device:
+            self.fp_configured_device_var.set(self._device_label(device))
+        else:
+            self.fp_configured_device_var.set("در تنظیمات انتخاب نشده است")
 
     def suggest_finger_id_async(self) -> None:
-        device = self._selected_directory_device()
+        device = self._configured_device()
         if not device:
-            self.fp_status_var.set("ابتدا دستگاه را انتخاب کنید.")
+            self.fp_status_var.set("ابتدا شعبه و دستگاه را در تب تنظیمات انتخاب و ذخیره کنید.")
             return
         self.fp_status_var.set("در حال پیدا کردن اولین کد آزاد...")
         threading.Thread(target=self._suggest_finger_id_worker, args=(device,), daemon=True).start()
@@ -1685,15 +1766,15 @@ class HozoorApp(tk.Tk):
             }))
 
     def start_direct_enrollment(self) -> None:
-        branch = self._selected_branch()
         user = self._selected_user()
-        device = self._selected_directory_device()
+        device = self._configured_device()
+        settings = read_json(SETTINGS_PATH, DEFAULT_SETTINGS)
 
         if not user:
             messagebox.showwarning("ثبت اثر انگشت", "یک فرد را انتخاب کنید.")
             return
         if not device:
-            messagebox.showwarning("ثبت اثر انگشت", "یک دستگاه را انتخاب کنید.")
+            messagebox.showwarning("ثبت اثر انگشت", "ابتدا شعبه و دستگاه را در تب تنظیمات انتخاب و ذخیره کنید.")
             return
         if not self.engine.device:
             messagebox.showwarning("ثبت اثر انگشت", "دستگاه فیزیکی به این کامپیوتر متصل نیست.")
@@ -1701,7 +1782,7 @@ class HozoorApp(tk.Tk):
         if str(self.engine.device.device_code).strip() != str(device["device_code"]).strip():
             messagebox.showwarning(
                 "ثبت اثر انگشت",
-                f"دستگاه متصل {self.engine.device.device_code} است، اما {device['device_code']} انتخاب شده.",
+                f"دستگاه متصل {self.engine.device.device_code} است، اما دستگاه تنظیم‌شده {device['device_code']} است.",
             )
             return
 
@@ -1729,7 +1810,7 @@ class HozoorApp(tk.Tk):
             return
 
         payload = {
-            "branch_id": int(branch["id"]) if branch else device.get("branch_id"),
+            "branch_id": int(settings["selected_branch_id"]) if settings.get("selected_branch_id") not in (None, "") else device.get("branch_id"),
             "username": str(user["username"]),
             "user_name": str(user["name"]),
             "device_id": int(device["id"]),
@@ -1847,7 +1928,7 @@ class HozoorApp(tk.Tk):
         self.events_box.pack(fill="both", expand=True)
 
     def build_settings(self, parent: tk.Frame) -> None:
-        self.section_title(parent, "تنظیمات", "فقط تنظیمات غیرحساس قابل تغییر است.")
+        self.section_title(parent, "تنظیمات", "شعبه و دستگاه این سیستم را یک‌بار انتخاب و ذخیره کنید.")
         info = tk.Frame(parent, bg=C_SURFACE, highlightthickness=1, highlightbackground=C_LINE)
         info.pack(fill="x", pady=(0, 14))
         tk.Label(
@@ -1855,6 +1936,40 @@ class HozoorApp(tk.Tk):
             text="آدرس سرور مرکزی، توکن و تنظیمات حساس داخل فایل نصب بسته‌بندی شده‌اند و در این صفحه نمایش داده نمی‌شوند.",
             bg=C_SURFACE, fg=C_TEXT, font=self.f_normal, wraplength=760, justify="right"
         ).pack(anchor="e", padx=16, pady=14)
+
+        assignment = tk.Frame(parent, bg=C_SURFACE, highlightthickness=1, highlightbackground=C_LINE)
+        assignment.pack(fill="x", pady=(0, 14))
+
+        assignment_top = tk.Frame(assignment, bg=C_SURFACE)
+        assignment_top.pack(fill="x", padx=16, pady=(14, 6))
+        tk.Label(assignment_top, text="اتصال شعبه و دستگاه", bg=C_SURFACE, fg=C_TEXT, font=self.f_bold).pack(side="right")
+        self.secondary_button(assignment_top, "دریافت فهرست‌ها", self.refresh_directory_data_async).pack(side="left")
+
+        def assignment_row(label: str, widget: tk.Widget) -> None:
+            row = tk.Frame(assignment, bg=C_SURFACE)
+            row.pack(fill="x", padx=16, pady=7)
+            tk.Label(row, text=label, bg=C_SURFACE, fg=C_TEXT, font=self.f_normal, width=18, anchor="e").pack(side="right")
+            widget.pack(side="right", fill="x", expand=True, padx=(12, 0))
+
+        self.settings_branch_combo = ttk.Combobox(
+            assignment, textvariable=self.settings_branch_var, state="readonly", justify="right", width=55
+        )
+        self.settings_device_combo = ttk.Combobox(
+            assignment, textvariable=self.settings_device_var, state="readonly", justify="right", width=55
+        )
+        assignment_row("شعبه", self.settings_branch_combo)
+        assignment_row("دستگاه", self.settings_device_combo)
+        self.settings_branch_combo.bind("<<ComboboxSelected>>", lambda _e: self.apply_directory_filters())
+        self.settings_device_combo.bind("<<ComboboxSelected>>", lambda _e: self.apply_directory_filters())
+
+        tk.Label(
+            assignment,
+            textvariable=self.settings_assignment_status_var,
+            bg=C_SURFACE,
+            fg=C_MUTED,
+            font=self.f_small,
+            justify="right",
+        ).pack(anchor="e", padx=16, pady=(6, 14))
 
         self.settings_vars: Dict[str, tk.StringVar] = {}
         settings = read_json(SETTINGS_PATH, DEFAULT_SETTINGS)
@@ -1927,6 +2042,17 @@ class HozoorApp(tk.Tk):
                 elif event == "fingerprint_status":
                     payload = data or {}
                     self.fp_status_var.set(str(payload.get("message") or ""))
+                elif event == "device_branch_status":
+                    payload = data or {}
+                    self.settings_assignment_status_var.set(str(payload.get("message") or ""))
+                elif event == "device_branch_saved":
+                    payload = data or {}
+                    message = str(payload.get("message") or "تنظیمات شعبه و دستگاه ذخیره شد.")
+                    self.settings_assignment_status_var.set(message)
+                    if payload.get("ok"):
+                        messagebox.showinfo("ذخیره شد", message)
+                    else:
+                        messagebox.showwarning("ارسال ناموفق", message)
                 elif event == "refresh":
                     self.refresh_ui()
         except queue.Empty:
@@ -2063,9 +2189,59 @@ class HozoorApp(tk.Tk):
                     messagebox.showerror("خطا", "مقادیر زمانی باید عدد باشند.")
                     return
             settings[key] = value
+
+        branch = self._selected_settings_branch()
+        device = self._selected_settings_device()
+
+        # When lists have been loaded, a concrete branch and device selection is mandatory.
+        if self.directory_branches and not branch:
+            messagebox.showwarning("تنظیمات", "یک شعبه را انتخاب کنید.")
+            return
+        if self.directory_devices and not device:
+            messagebox.showwarning("تنظیمات", "یک دستگاه را انتخاب کنید.")
+            return
+
+        if branch:
+            settings["selected_branch_id"] = int(branch["id"])
+        if device:
+            settings["selected_device_id"] = int(device["id"])
+            settings["selected_device_code"] = str(device["device_code"])
+            settings["selected_device_title"] = str(device["title"])
+
+        branch_id = settings.get("selected_branch_id")
+        device_id = settings.get("selected_device_id")
+        if branch_id in (None, "") or device_id in (None, ""):
+            messagebox.showwarning(
+                "تنظیمات",
+                "ابتدا «دریافت فهرست‌ها» را بزنید و شعبه و دستگاه را انتخاب کنید.",
+            )
+            return
+
         write_json(SETTINGS_PATH, settings)
         self.engine.reload_settings()
-        messagebox.showinfo("ذخیره شد", "تنظیمات ذخیره شد.")
+        self.apply_directory_filters()
+        self.settings_assignment_status_var.set("تنظیمات محلی ذخیره شد؛ در حال ارسال به سرور...")
+        threading.Thread(
+            target=self._save_device_branch_worker,
+            args=(int(device_id), int(branch_id)),
+            daemon=True,
+        ).start()
+
+    def _save_device_branch_worker(self, device_id: int, branch_id: int) -> None:
+        try:
+            # Contract is intentionally exact: only device_id and branch_id are posted.
+            response = self.engine.client.save_device_branch(device_id, branch_id)
+            if isinstance(response, dict) and (response.get("ok") is False or response.get("success") is False):
+                raise RuntimeError(str(response.get("message") or "سرور تنظیمات شعبه و دستگاه را تایید نکرد"))
+            self.ui_queue.put(("device_branch_saved", {
+                "ok": True,
+                "message": "شعبه و دستگاه با موفقیت در سرور ذخیره شد.",
+            }))
+        except Exception as exc:
+            self.ui_queue.put(("device_branch_saved", {
+                "ok": False,
+                "message": f"تنظیمات محلی ذخیره شد، اما ارسال به سرور ناموفق بود: {exc}",
+            }))
 
     def export_log(self) -> None:
         target = filedialog.asksaveasfilename(
@@ -2088,6 +2264,17 @@ class HozoorApp(tk.Tk):
 
 def main() -> int:
     log_line(f"Starting {APP_VERSION}")
+    if not SERVER_ID:
+        message = (
+            "Server ID was not injected into this build.\n"
+            "Set the GitHub Repository Variable HOZOOR_SERVER_ID and rebuild the installer."
+        )
+        log_line(message.replace("\n", " | "))
+        try:
+            ctypes.windll.user32.MessageBoxW(None, message, APP_NAME, 0x10)
+        except Exception:
+            print(message)
+        return 2
     app = HozoorApp()
     app.mainloop()
     return 0
