@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HiMate Sync - Customer Final Installer
-Version: CUSTOMER-FINAL-INSTALLER-0.4.2
+Version: CUSTOMER-FINAL-INSTALLER-0.4.3
 
 Rules:
 - Customer UI is clean and product-facing, not debug-facing.
@@ -51,7 +51,7 @@ from tkinter import font as tkfont
 try:
     import hozoor_customer_build_config as build_config
 
-    APP_VERSION = getattr(build_config, "APP_VERSION", "CUSTOMER-FINAL-INSTALLER-0.4.2-DEV")
+    APP_VERSION = getattr(build_config, "APP_VERSION", "CUSTOMER-FINAL-INSTALLER-0.4.3-DEV")
     APP_NAME = getattr(build_config, "APP_NAME", "HiMate Sync")
     SERVER_URL = getattr(build_config, "SERVER_URL", "https://hozoor.example.com")
     SERVER_ID = getattr(build_config, "SERVER_ID", "HOZOOR_MAIN")
@@ -60,7 +60,7 @@ try:
     DIRECTORY_API_URL = getattr(build_config, "DIRECTORY_API_URL", "https://mangroup.ir")
     DIRECTORY_API_TOKEN = getattr(build_config, "DIRECTORY_API_TOKEN", "")
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.4.2-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.4.3-DEV"
     APP_NAME = "HiMate Sync"
     SERVER_URL = "https://hozoor.example.com"
     SERVER_ID = "HOZOOR_MAIN"
