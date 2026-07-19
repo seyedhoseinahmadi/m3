@@ -4,7 +4,7 @@
   #define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
 #endif
 #if MyAppVersion == ""
-  #define MyAppVersion "0.4.3"
+  #define MyAppVersion "0.4.4"
 #endif
 #define MyAppPublisher "Avaye Farda Media"
 #define MyAppURL "https://avayefardamedia.com"
@@ -44,7 +44,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Name: "startup"; Description: "Run HiMate Sync automatically when Windows starts"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
-Source: "..\dist\HiMateSync.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+; The workflow stages the PyInstaller output here before compiling the installer.
+Source: "..\Output\HiMateSync.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 Source: "..\README_INSTALLER_FA.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\README_MARKET_PRODUCT_FA.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\UI_FINAL_GUIDE_FA.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
