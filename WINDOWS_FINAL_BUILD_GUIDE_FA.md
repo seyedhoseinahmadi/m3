@@ -35,7 +35,7 @@ dist\HozoorSyncCustomer.exe
 Inno Setup فایل زیر را می‌سازد:
 
 ```text
-Output\HozoorSyncCustomer_Setup.exe
+Output\HiMateSync_Setup.exe
 ```
 
 ## نصب روی مشتری

@@ -9,7 +9,7 @@ Output\HozoorSyncCustomer_Setup_v0_2_5.exe
 از این نسخه خروجی ثابت است:
 
 ```text
-Output\HozoorSyncCustomer_Setup.exe
+Output\HiMateSync_Setup.exe
 ```
 
 و فقط یک workflow باید در ریپو باقی بماند:

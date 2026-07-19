@@ -13,7 +13,7 @@
 ## خروجی ثابت
 
 ```text
-HozoorSyncCustomer_Setup.exe
+HiMateSync_Setup.exe
 ```
 
 داخل Release ثابت:
@@ -47,5 +47,5 @@ assets/ اگر فایل تصویری یا مجاز داشتی
 نام خروجی همچنان ثابت می‌ماند:
 
 ```text
-HozoorSyncCustomer_Setup.exe
+HiMateSync_Setup.exe
 ```

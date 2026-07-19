@@ -1,53 +1,39 @@
 #define MyAppName "HiMate Sync"
 #define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
 #if MyAppVersion == ""
-#define MyAppVersion GetEnv("HOZOOR_APP_VERSION")
-#if MyAppVersion == ""
-#define MyAppVersion "0.3.8"
-#endif
+  #define MyAppVersion "0.4.2"
 #endif
 #define MyAppPublisher "Avaye Farda Media"
-#define MyAppURL "https://avayefardamedia.com"
-#define MyAppExeName "HozoorSyncCustomer.exe"
+#define MyAppExeName "HiMateSync.exe"
 
 [Setup]
-AppId={{B5B49748-7D5A-4E75-91F2-202600000248}}
+AppId={{A7AFB883-8062-4B40-A5A9-7D740F474164}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppPublisherURL={#MyAppURL}
-AppSupportURL={#MyAppURL}
-AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\Avaye Farda\HiMate Sync
 DefaultGroupName=Avaye Farda\HiMate Sync
 DisableProgramGroupPage=yes
 OutputDir=..\Output
-OutputBaseFilename=HozoorSyncCustomer_Setup
+OutputBaseFilename=HiMateSync_Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+UninstallDisplayName=HiMate Sync
 SetupLogging=yes
-UninstallDisplayIcon={app}\{#MyAppExeName}
-CloseApplications=yes
-RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: checkedonce
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 Name: "startup"; Description: "Run HiMate Sync automatically when Windows starts"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [Files]
-Source: "..\dist\HozoorSyncCustomer.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
-Source: "..\README_INSTALLER_FA.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\README_MARKET_PRODUCT_FA.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\UI_FINAL_GUIDE_FA.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\customer_settings.example.json"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\VERSION.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\assets\fonts\*"; DestDir: "{app}\assets\fonts"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "..\dist\HiMateSync.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\HiMate Sync"; Filename: "{app}\{#MyAppExeName}"
@@ -61,4 +47,4 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch HiMate Sync"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\HozoorSyncCustomer\temp"
+Type: filesandordirs; Name: "{localappdata}\HiMateSync\temp"

@@ -13,7 +13,7 @@
 خروجی نهایی:
 
 ```text
-HozoorSyncCustomer_Setup.exe
+HiMateSync_Setup.exe
 ```
 
 ## فونت

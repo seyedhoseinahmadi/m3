@@ -6,9 +6,9 @@ cd /d "%~dp0"
 python -m pip install -r requirements.txt
 python prepare_fonts.py
 python make_build_config.py
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name HozoorSyncCustomer hozoor_customer_app.py
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name HiMateSync hozoor_customer_app.py
 
 echo.
 echo EXE:
-echo %cd%\dist\HozoorSyncCustomer.exe
+echo %cd%\dist\HiMateSync.exe
 pause

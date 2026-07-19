@@ -31,5 +31,5 @@ import sys
 خروجی همچنان ثابت است:
 
 ```text
-HozoorSyncCustomer_Setup.exe
+HiMateSync_Setup.exe
 ```

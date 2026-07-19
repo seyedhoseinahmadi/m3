@@ -19,7 +19,7 @@
 
 ```text
 HozoorSyncCustomer_Setup_latest.exe
-HozoorSyncCustomer_Setup.exe
+HiMateSync_Setup.exe
 ```
 
 Release ثابت:

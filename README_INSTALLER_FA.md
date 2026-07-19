@@ -9,7 +9,7 @@ CUSTOMER-FINAL-INSTALLER-0.2.9
 این پکیج برای ساخت فایل نصب نهایی ویندوز است:
 
 ```text
-HozoorSyncCustomer_Setup.exe
+HiMateSync_Setup.exe
 ```
 
 ## تفاوت با نسخه Portable
@@ -58,7 +58,7 @@ Agent Token اختیاری
 ## خروجی
 
 ```text
-Output\HozoorSyncCustomer_Setup.exe
+Output\HiMateSync_Setup.exe
 ```
 
 ## ساخت با GitHub

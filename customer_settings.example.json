@@ -13,5 +13,9 @@
   "pull_commands_endpoint": "/api/hozoor/agent/pull-commands",
   "command_result_endpoint": "/api/hozoor/agent/command-result",
   "restore_events_endpoint": "/api/hozoor/agent/restore-events",
-  "restore_confirm_endpoint": "/api/hozoor/agent/restore-confirm"
+  "restore_confirm_endpoint": "/api/hozoor/agent/restore-confirm",
+  "directory_users_endpoint": "/api/users",
+  "directory_branches_endpoint": "/api/branches",
+  "directory_devices_endpoint": "/api/devices",
+  "directory_register_endpoint": "/api/fingerprints/registe"
 }

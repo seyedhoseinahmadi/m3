@@ -11,7 +11,7 @@
 این فایل همیشه یک خروجی ثابت می‌سازد:
 
 ```text
-HozoorSyncCustomer_Setup.exe
+HiMateSync_Setup.exe
 ```
 
 و آن را داخل Release ثابت زیر می‌گذارد:
@@ -46,5 +46,5 @@ VERSION.txt
 همیشه از Releases این فایل را دانلود کن:
 
 ```text
-HozoorSyncCustomer_Setup.exe
+HiMateSync_Setup.exe
 ```

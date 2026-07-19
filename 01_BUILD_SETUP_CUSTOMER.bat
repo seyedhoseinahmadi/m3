@@ -10,7 +10,7 @@ echo Stable GitHub / Fixed Output
 echo ==========================================================
 echo.
 echo Final output:
-echo Output\HozoorSyncCustomer_Setup.exe
+echo Output\HiMateSync_Setup.exe
 echo.
 
 where python >nul 2>nul
@@ -35,7 +35,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name HozoorSyncCustomer hozoor_customer_app.py
+python -m PyInstaller --noconfirm --clean --onefile --windowed --name HiMateSync hozoor_customer_app.py
 if errorlevel 1 (
     echo ERROR: PyInstaller build failed.
     pause
@@ -66,6 +66,6 @@ if errorlevel 1 (
 
 echo.
 echo Done:
-echo %cd%\Output\HozoorSyncCustomer_Setup.exe
+echo %cd%\Output\HiMateSync_Setup.exe
 explorer "%cd%\Output"
 pause

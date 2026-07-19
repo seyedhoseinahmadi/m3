@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 HiMate Sync - Customer Final Installer
-Version: CUSTOMER-FINAL-INSTALLER-0.3.8
+Version: CUSTOMER-FINAL-INSTALLER-0.4.2
 
 Rules:
 - Customer UI is clean and product-facing, not debug-facing.
@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -44,25 +45,29 @@ except Exception:
     list_ports = None
 
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, ttk
 from tkinter import font as tkfont
 
 try:
-    from hozoor_customer_build_config import (
-        APP_VERSION,
-        APP_NAME,
-        SERVER_URL,
-        SERVER_ID,
-        AGENT_TOKEN,
-        BUILD_CHANNEL,
-    )
+    import hozoor_customer_build_config as build_config
+
+    APP_VERSION = getattr(build_config, "APP_VERSION", "CUSTOMER-FINAL-INSTALLER-0.4.2-DEV")
+    APP_NAME = getattr(build_config, "APP_NAME", "HiMate Sync")
+    SERVER_URL = getattr(build_config, "SERVER_URL", "https://hozoor.example.com")
+    SERVER_ID = getattr(build_config, "SERVER_ID", "HOZOOR_MAIN")
+    AGENT_TOKEN = getattr(build_config, "AGENT_TOKEN", "")
+    BUILD_CHANNEL = getattr(build_config, "BUILD_CHANNEL", "dev")
+    DIRECTORY_API_URL = getattr(build_config, "DIRECTORY_API_URL", "https://mangroup.ir")
+    DIRECTORY_API_TOKEN = getattr(build_config, "DIRECTORY_API_TOKEN", "")
 except Exception:
-    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.3.8-DEV"
+    APP_VERSION = "CUSTOMER-FINAL-INSTALLER-0.4.2-DEV"
     APP_NAME = "HiMate Sync"
     SERVER_URL = "https://hozoor.example.com"
     SERVER_ID = "HOZOOR_MAIN"
     AGENT_TOKEN = ""
     BUILD_CHANNEL = "dev"
+    DIRECTORY_API_URL = "https://mangroup.ir"
+    DIRECTORY_API_TOKEN = ""
 
 
 BAUDRATE = 9600
@@ -83,6 +88,12 @@ DEFAULT_SETTINGS = {
     "command_result_endpoint": "/api/hozoor/agent/command-result",
     "restore_events_endpoint": "/api/hozoor/agent/restore-events",
     "restore_confirm_endpoint": "/api/hozoor/agent/restore-confirm",
+
+    # Direct enrollment / directory API. These routes may live on a separate Laravel domain.
+    "directory_users_endpoint": "/api/users",
+    "directory_branches_endpoint": "/api/branches",
+    "directory_devices_endpoint": "/api/devices",
+    "directory_register_endpoint": "/api/fingerprints/registe",
 }
 
 # Avaye Farda-ish UI
@@ -285,6 +296,32 @@ class HozoorDB:
                     created_at TEXT NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS hz_fingerprint_registrations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    registration_uuid TEXT NOT NULL UNIQUE,
+                    user_id INTEGER NOT NULL DEFAULT 0,
+                    username TEXT NOT NULL,
+                    branch_id INTEGER,
+                    device_id INTEGER NOT NULL,
+                    device_code TEXT NOT NULL,
+                    finger_id INTEGER NOT NULL,
+                    user_name TEXT,
+                    registered_at TEXT NOT NULL,
+                    server_synced INTEGER DEFAULT 0,
+                    server_synced_at TEXT,
+                    attempts INTEGER DEFAULT 0,
+                    last_error TEXT,
+                    response_json TEXT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(device_id, finger_id)
+                )
+            """)
+            # Upgrade existing local databases created before username-only enrollment.
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(hz_fingerprint_registrations)").fetchall()}
+            if "username" not in columns:
+                conn.execute("ALTER TABLE hz_fingerprint_registrations ADD COLUMN username TEXT")
+            conn.execute("UPDATE hz_fingerprint_registrations SET username=COALESCE(NULLIF(username,''), NULLIF(user_name,''), 'legacy-' || user_id)")
             conn.commit()
 
     def add_log(self, level: str, message: str) -> None:
@@ -421,9 +458,101 @@ class HozoorDB:
             conn.commit()
 
 
+    def save_fingerprint_registration(self, item: Dict[str, Any]) -> Tuple[bool, str]:
+        """Persist a successful hardware enrollment before/while reporting it to Laravel."""
+        with self.lock, self.connect() as conn:
+            existing = conn.execute(
+                "SELECT id, username, registration_uuid FROM hz_fingerprint_registrations WHERE device_id=? AND finger_id=?",
+                (int(item["device_id"]), int(item["finger_id"])),
+            ).fetchone()
+            if existing:
+                if str(existing["username"] or "") == str(item["username"]):
+                    return True, "already_saved"
+                return False, "slot_conflict"
+
+            conn.execute("""
+                INSERT INTO hz_fingerprint_registrations(
+                    registration_uuid, user_id, username, branch_id, device_id, device_code,
+                    finger_id, user_name, registered_at, server_synced, attempts,
+                    last_error, response_json, created_at
+                ) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, ?)
+            """, (
+                str(item["registration_uuid"]), str(item["username"]),
+                int(item["branch_id"]) if item.get("branch_id") not in (None, "") else None,
+                int(item["device_id"]), str(item["device_code"]),
+                int(item["finger_id"]), str(item.get("user_name") or item["username"]),
+                str(item["registered_at"]), local_now(),
+            ))
+            conn.commit()
+            return True, "inserted"
+
+    def pending_fingerprint_registrations(self, limit: int = 20) -> List[Dict[str, Any]]:
+        with self.lock, self.connect() as conn:
+            rows = conn.execute("""
+                SELECT * FROM hz_fingerprint_registrations
+                WHERE server_synced=0
+                ORDER BY id ASC
+                LIMIT ?
+            """, (int(limit),)).fetchall()
+            return [dict(row) for row in rows]
+
+    def mark_fingerprint_registration_synced(self, registration_uuid: str, response: Any) -> None:
+        with self.lock, self.connect() as conn:
+            conn.execute("""
+                UPDATE hz_fingerprint_registrations
+                SET server_synced=1, server_synced_at=?, attempts=attempts+1,
+                    last_error=NULL, response_json=?
+                WHERE registration_uuid=?
+            """, (
+                local_now(), json.dumps(response, ensure_ascii=False),
+                str(registration_uuid),
+            ))
+            conn.commit()
+
+    def mark_fingerprint_registration_failed(self, registration_uuid: str, error: str, response: Any = None) -> None:
+        with self.lock, self.connect() as conn:
+            conn.execute("""
+                UPDATE hz_fingerprint_registrations
+                SET attempts=attempts+1, last_error=?, response_json=?
+                WHERE registration_uuid=?
+            """, (
+                str(error)[:1000],
+                json.dumps(response, ensure_ascii=False) if response is not None else None,
+                str(registration_uuid),
+            ))
+            conn.commit()
+
+    def fingerprint_registration_for_slot(self, device_id: int, finger_id: int) -> Optional[Dict[str, Any]]:
+        """Return the locally known mapping for one device slot, if any."""
+        with self.lock, self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM hz_fingerprint_registrations WHERE device_id=? AND finger_id=? LIMIT 1",
+                (int(device_id), int(finger_id)),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def local_used_finger_ids(self, device_id: int) -> List[int]:
+        with self.lock, self.connect() as conn:
+            rows = conn.execute("""
+                SELECT finger_id FROM hz_fingerprint_registrations
+                WHERE device_id=?
+                ORDER BY finger_id ASC
+            """, (int(device_id),)).fetchall()
+            return [int(row["finger_id"]) for row in rows]
+
+    def local_next_finger_id(self, device_id: int, maximum: int = 1000) -> int:
+        used = set(self.local_used_finger_ids(device_id))
+        for finger_id in range(1, int(maximum) + 1):
+            if finger_id not in used:
+                return finger_id
+        raise RuntimeError("ظرفیت کدهای اثر انگشت این دستگاه پر شده است")
+
+
+
 class SerialBridge:
     def __init__(self, db: HozoorDB):
         self.db = db
+        self.serial_lock = threading.RLock()
 
     def available_ports(self) -> List[str]:
         if list_ports is None:
@@ -434,26 +563,27 @@ class SerialBridge:
         if serial is None:
             raise RuntimeError("pyserial نصب نیست")
         lines: List[str] = []
-        with serial.Serial(port, BAUDRATE, timeout=0.3, write_timeout=1) as ser:
-            time.sleep(0.2)
-            ser.reset_input_buffer()
-            ser.write((command.strip() + "\n").encode("ascii", errors="ignore"))
-            ser.flush()
-            end_at = time.time() + timeout
-            while time.time() < end_at:
-                raw = ser.readline()
-                if not raw:
-                    time.sleep(0.05)
-                    continue
-                line = raw.decode("utf-8", errors="replace").strip()
-                if line:
-                    lines.append(line)
-                    if command in ("R", "SEND_PENDING"):
-                        if line.startswith("END,EVENTS"):
-                            break
-                    else:
-                        if line.startswith(("OK,", "ERR,", "PONG,", "DEVICE,")):
-                            break
+        with self.serial_lock:
+            with serial.Serial(port, BAUDRATE, timeout=0.3, write_timeout=1) as ser:
+                time.sleep(0.2)
+                ser.reset_input_buffer()
+                ser.write((command.strip() + "\n").encode("ascii", errors="ignore"))
+                ser.flush()
+                end_at = time.time() + timeout
+                while time.time() < end_at:
+                    raw = ser.readline()
+                    if not raw:
+                        time.sleep(0.05)
+                        continue
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if line:
+                        lines.append(line)
+                        if command in ("R", "SEND_PENDING"):
+                            if line.startswith("END,EVENTS"):
+                                break
+                        else:
+                            if line.startswith(("OK,", "ERR,", "PONG,", "DEVICE,")):
+                                break
         return lines
 
     def parse_device_code(self, lines: List[str]) -> str:
@@ -694,6 +824,157 @@ class LaravelClient:
         return self.post("command_result_endpoint", payload, timeout=20)
 
 
+
+class DirectoryApiClient:
+    """Client for users/branches/devices/fingerprint registration APIs."""
+
+    def __init__(self, settings: Dict[str, Any]):
+        self.settings = settings
+
+    def headers(self) -> Dict[str, str]:
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=utf-8",
+            "X-HiMate-Agent-Version": APP_VERSION,
+        }
+        if DIRECTORY_API_TOKEN:
+            headers["Authorization"] = f"Bearer {DIRECTORY_API_TOKEN}"
+            headers["X-HiMate-Token"] = DIRECTORY_API_TOKEN
+        return headers
+
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        payload: Optional[Dict[str, Any]] = None,
+        timeout: int = 25,
+    ) -> Any:
+        if requests is None:
+            raise RuntimeError("requests نصب نیست")
+        url = join_url(DIRECTORY_API_URL, endpoint)
+        response = requests.request(
+            method.upper(),
+            url,
+            headers=self.headers(),
+            params=params or None,
+            json=payload if payload is not None else None,
+            timeout=timeout,
+        )
+        try:
+            data = response.json()
+        except Exception:
+            data = None
+
+        if 200 <= response.status_code < 300:
+            return data
+
+        if isinstance(data, dict):
+            message = data.get("message") or data.get("error") or f"HTTP {response.status_code}"
+            exc = RuntimeError(str(message))
+            setattr(exc, "status_code", response.status_code)
+            setattr(exc, "response_json", data)
+            raise exc
+
+        if response.status_code in (502, 503, 504):
+            raise RuntimeError(f"HTTP {response.status_code}: سرویس فهرست کاربران/دستگاه‌ها موقتاً در دسترس نیست")
+        raise RuntimeError(f"HTTP {response.status_code}: پاسخ نامعتبر از سرویس فهرست‌ها")
+
+    @staticmethod
+    def _extract_list(data: Any, keys: Tuple[str, ...]) -> List[Dict[str, Any]]:
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, dict):
+            for key in keys:
+                value = data.get(key)
+                if isinstance(value, list):
+                    return [item for item in value if isinstance(item, dict)]
+            nested = data.get("data")
+            if isinstance(nested, dict):
+                for key in keys:
+                    value = nested.get(key)
+                    if isinstance(value, list):
+                        return [item for item in value if isinstance(item, dict)]
+            if isinstance(nested, list):
+                return [item for item in nested if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _first(item: Dict[str, Any], *keys: str, default: Any = None) -> Any:
+        for key in keys:
+            if key in item and item.get(key) not in (None, ""):
+                return item.get(key)
+        return default
+
+    def users(self, branch_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        endpoint = self.settings.get("directory_users_endpoint", DEFAULT_SETTINGS["directory_users_endpoint"])
+        params = {"branch_id": int(branch_id)} if branch_id else None
+        rows = self._extract_list(self._request("GET", endpoint, params=params), ("users", "employees", "items"))
+        result = []
+        for row in rows:
+            username = self._first(row, "username", "user_name", "login", "email")
+            if username in (None, ""):
+                continue
+            name = self._first(row, "name", "full_name", "display_name", "title", default=str(username))
+            result.append({
+                "username": str(username),
+                "name": str(name),
+                "branch_id": self._first(row, "branch_id"),
+                "employee_code": self._first(row, "employee_code", "code", "personnel_code"),
+                "raw": row,
+            })
+        return result
+
+    def branches(self) -> List[Dict[str, Any]]:
+        endpoint = self.settings.get("directory_branches_endpoint", DEFAULT_SETTINGS["directory_branches_endpoint"])
+        rows = self._extract_list(self._request("GET", endpoint), ("branches", "items"))
+        result = []
+        for row in rows:
+            branch_id = self._first(row, "id", "branch_id")
+            if branch_id in (None, ""):
+                continue
+            title = self._first(row, "title", "name", "branch_name", default=f"شعبه {branch_id}")
+            result.append({"id": int(branch_id), "title": str(title), "raw": row})
+        return result
+
+    def devices(self, branch_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        endpoint = self.settings.get("directory_devices_endpoint", DEFAULT_SETTINGS["directory_devices_endpoint"])
+        params = {"branch_id": int(branch_id)} if branch_id else None
+        rows = self._extract_list(self._request("GET", endpoint, params=params), ("devices", "items"))
+        result = []
+        for row in rows:
+            device_id = self._first(row, "id", "device_id")
+            device_code = self._first(row, "device_code", "code", "deviceCode")
+            if device_id in (None, "") or device_code in (None, ""):
+                continue
+            title = self._first(row, "device_title", "title", "name", default=str(device_code))
+            result.append({
+                "id": int(device_id),
+                "device_code": str(device_code).strip(),
+                "title": str(title),
+                "branch_id": self._first(row, "branch_id"),
+                "raw": row,
+            })
+        return result
+
+    def register_fingerprint(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        endpoint = self.settings.get("directory_register_endpoint", DEFAULT_SETTINGS["directory_register_endpoint"])
+        exact_payload = {
+            "username": str(payload["username"]),
+            "device_id": int(payload["device_id"]),
+            "device_code": str(payload["device_code"]),
+            "finger_id": int(payload["finger_id"]),
+        }
+        data = self._request("POST", endpoint, payload=exact_payload, timeout=30)
+        if isinstance(data, dict):
+            if data.get("ok") is False or data.get("success") is False:
+                raise RuntimeError(str(data.get("message") or "ثبت اثر انگشت در سرور تایید نشد"))
+            return data
+        return {"ok": True, "data": data}
+
+
+
 class SyncEngine:
     def __init__(self, db: HozoorDB, ui_queue: "queue.Queue[Tuple[str, Any]]"):
         self.db = db
@@ -701,6 +982,7 @@ class SyncEngine:
         self.settings = read_json(SETTINGS_PATH, DEFAULT_SETTINGS)
         self.serial_bridge = SerialBridge(db)
         self.client = LaravelClient(self.settings)
+        self.directory_client = DirectoryApiClient(self.settings)
         self.stop_event = threading.Event()
         self.thread: Optional[threading.Thread] = None
         self.device: Optional[DeviceInfo] = None
@@ -720,6 +1002,7 @@ class SyncEngine:
     def reload_settings(self) -> None:
         self.settings = read_json(SETTINGS_PATH, DEFAULT_SETTINGS)
         self.client = LaravelClient(self.settings)
+        self.directory_client = DirectoryApiClient(self.settings)
 
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -757,6 +1040,7 @@ class SyncEngine:
 
                 if now - last_sync >= int(self.settings.get("sync_interval_seconds", 5)):
                     self.sync_to_server()
+                    self.sync_pending_fingerprint_registrations()
                     last_sync = now
 
                 # Heartbeat is secondary; shorter timeout in client.
@@ -874,6 +1158,23 @@ class SyncEngine:
         else:
             self.status("سرور اجازه ACK نداد؛ رکورد روی دستگاه می‌ماند")
 
+
+    def sync_pending_fingerprint_registrations(self) -> None:
+        for item in self.db.pending_fingerprint_registrations(limit=10):
+            payload = {
+                "username": str(item["username"]),
+                "device_id": int(item["device_id"]),
+                "device_code": str(item["device_code"]),
+                "finger_id": int(item["finger_id"]),
+            }
+            try:
+                response = self.directory_client.register_fingerprint(payload)
+                self.db.mark_fingerprint_registration_synced(item["registration_uuid"], response)
+                self.status(f"ثبت اثر انگشت {item['finger_id']} در سرور تایید شد")
+            except Exception as exc:
+                self.db.mark_fingerprint_registration_failed(item["registration_uuid"], str(exc))
+
+
     def restore_from_server(self) -> None:
         device_code = self.device.device_code if self.device else str(self.db.active_device().get("device_code", "") or "")
         events = self.client.restore_events(device_code)
@@ -946,6 +1247,23 @@ class SyncEngine:
                 "serial_response": [],
                 "error_message": None,
             }
+
+            # Enrollment is intentionally initiated only from the Windows tab.
+            # Laravel may still send other commands such as SET_TIME or DELETE_FINGER.
+            if command_type_upper in ("ENROLL_FINGER", "ENROLL", "ADD_FINGER"):
+                result["error_message"] = "ثبت اثر انگشت فقط از تب ثبت اثر انگشت برنامه ویندوز انجام می‌شود"
+                self.emit("command_notice", result["error_message"])
+                self.status(result["error_message"])
+                self.db.record_command_log(
+                    command_uuid, device_code, command_type,
+                    result["serial_command"], result["status"], result,
+                )
+                try:
+                    self.client.command_result(result)
+                except Exception as exc:
+                    self.db.add_log("ERROR", f"command-result failed: {exc}")
+                continue
+
             try:
                 if device_code and device_code != self.device.device_code:
                     raise RuntimeError("دستور برای دستگاه متصل فعلی نیست")
@@ -1020,8 +1338,8 @@ class HozoorApp(tk.Tk):
         super().__init__()
         self.font_family = choose_font(self)
         self.title("HiMate Sync")
-        self.geometry("1040x660")
-        self.minsize(920, 600)
+        self.geometry("1120x720")
+        self.minsize(980, 640)
         self.configure(bg=C_BG)
 
         self.db = HozoorDB(DB_PATH)
@@ -1043,6 +1361,18 @@ class HozoorApp(tk.Tk):
         self.command_notice_var = tk.StringVar(value="دستور فعالی دریافت نشده است")
         self.enroll_window: Optional[tk.Toplevel] = None
         self.enroll_status_var = tk.StringVar(value="")
+
+        # Direct fingerprint enrollment UI state.
+        self.directory_branches: List[Dict[str, Any]] = []
+        self.directory_users: List[Dict[str, Any]] = []
+        self.directory_devices: List[Dict[str, Any]] = []
+        self.filtered_users: List[Dict[str, Any]] = []
+        self.filtered_devices: List[Dict[str, Any]] = []
+        self.fp_branch_var = tk.StringVar(value="")
+        self.fp_user_var = tk.StringVar(value="")
+        self.fp_device_var = tk.StringVar(value="")
+        self.fp_finger_id_var = tk.StringVar(value="")
+        self.fp_status_var = tk.StringVar(value="برای شروع، فهرست‌ها را دریافت کنید.")
 
         self.setup_base_fonts()
         self.build_ui()
@@ -1106,6 +1436,7 @@ class HozoorApp(tk.Tk):
 
         nav_items = [
             ("home", "خانه"),
+            ("fingerprint", "ثبت اثر انگشت"),
             ("device", "دستگاه"),
             ("sync", "همگام‌سازی"),
             ("settings", "تنظیمات"),
@@ -1126,6 +1457,7 @@ class HozoorApp(tk.Tk):
             self.page_frames[key] = frame
 
         self.build_home(self.page_frames["home"])
+        self.build_fingerprint(self.page_frames["fingerprint"])
         self.build_device(self.page_frames["device"])
         self.build_sync(self.page_frames["sync"])
         self.build_settings(self.page_frames["settings"])
@@ -1135,7 +1467,7 @@ class HozoorApp(tk.Tk):
         footer = tk.Frame(self, bg=C_BG, height=34)
         footer.pack(fill="x", side="bottom")
         tk.Label(footer, textvariable=self.status_var, bg=C_BG, fg=C_MUTED, font=self.f_small).pack(side="right", padx=18)
-        tk.Label(footer, text=f"Server: {SERVER_ID}", bg=C_BG, fg=C_MUTED, font=self.f_small).pack(side="left", padx=18)
+        tk.Label(footer, text="HiMate • اتصال امن مرکزی", bg=C_BG, fg=C_MUTED, font=self.f_small).pack(side="left", padx=18)
 
     def show_page(self, key: str) -> None:
         for k, frame in self.page_frames.items():
@@ -1186,6 +1518,298 @@ class HozoorApp(tk.Tk):
         command_box.pack(fill="x", pady=(12, 0))
         tk.Label(command_box, text="آخرین دستور سرور", bg=C_SURFACE, fg=C_MUTED, font=self.f_small).pack(anchor="e", padx=16, pady=(12, 0))
         tk.Label(command_box, textvariable=self.command_notice_var, bg=C_SURFACE, fg=C_TEXT, font=self.f_bold, wraplength=760, justify="right").pack(anchor="e", padx=16, pady=(6, 14))
+
+
+    def build_fingerprint(self, parent: tk.Frame) -> None:
+        self.section_title(
+            parent,
+            "ثبت اثر انگشت",
+            "فرد و دستگاه را از فهرست سرور انتخاب کنید؛ ثبت روی سنسور مستقیم از همین کامپیوتر انجام می‌شود.",
+        )
+
+        actions = tk.Frame(parent, bg=C_BG)
+        actions.pack(fill="x", pady=(0, 12))
+        self.primary_button(actions, "دریافت فهرست‌ها", self.refresh_directory_data_async).pack(side="right")
+
+        form = tk.Frame(parent, bg=C_SURFACE, highlightthickness=1, highlightbackground=C_LINE)
+        form.pack(fill="x")
+
+        def add_row(label: str, widget: tk.Widget) -> None:
+            row = tk.Frame(form, bg=C_SURFACE)
+            row.pack(fill="x", padx=18, pady=9)
+            tk.Label(row, text=label, bg=C_SURFACE, fg=C_TEXT, font=self.f_bold, width=18, anchor="e").pack(side="right")
+            widget.pack(side="right", fill="x", expand=True, padx=(12, 0))
+
+        self.fp_branch_combo = ttk.Combobox(form, textvariable=self.fp_branch_var, state="readonly", justify="right", width=55)
+        self.fp_user_combo = ttk.Combobox(form, textvariable=self.fp_user_var, state="readonly", justify="right", width=55)
+        self.fp_device_combo = ttk.Combobox(form, textvariable=self.fp_device_var, state="readonly", justify="right", width=55)
+        self.fp_finger_entry = tk.Entry(form, textvariable=self.fp_finger_id_var, justify="right", font=self.f_normal, bd=1, relief="solid")
+
+        add_row("شعبه", self.fp_branch_combo)
+        add_row("فرد", self.fp_user_combo)
+        add_row("دستگاه", self.fp_device_combo)
+        add_row("کد اثر انگشت", self.fp_finger_entry)
+
+        self.fp_branch_combo.bind("<<ComboboxSelected>>", lambda _e: self.apply_directory_filters())
+
+        notice = tk.Frame(parent, bg="#FFF8E7", highlightthickness=1, highlightbackground="#F0D59A")
+        notice.pack(fill="x", pady=14)
+        tk.Label(
+            notice,
+            text=(
+                "شعبه فقط برای فیلتر فهرست‌هاست. پس از فشردن «شروع ثبت»، برنامه دستور را مستقیم به دستگاه متصل می‌فرستد. "
+                "فقط بعد از پاسخ موفق سنسور، دقیقاً username، device_id، device_code و finger_id در Laravel ثبت می‌شود."
+            ),
+            bg="#FFF8E7", fg=C_TEXT, font=self.f_normal, wraplength=820, justify="right",
+        ).pack(anchor="e", padx=16, pady=13)
+
+        bottom = tk.Frame(parent, bg=C_BG)
+        bottom.pack(fill="x")
+        self.primary_button(bottom, "شروع ثبت اثر انگشت", self.start_direct_enrollment).pack(side="right")
+        tk.Label(bottom, textvariable=self.fp_status_var, bg=C_BG, fg=C_MUTED, font=self.f_small, justify="right").pack(side="right", padx=14)
+
+    def refresh_directory_data_async(self) -> None:
+        self.fp_status_var.set("در حال دریافت فهرست شعبه‌ها، افراد و دستگاه‌ها...")
+        threading.Thread(target=self._refresh_directory_data_worker, daemon=True).start()
+
+    def _refresh_directory_data_worker(self) -> None:
+        try:
+            client = DirectoryApiClient(read_json(SETTINGS_PATH, DEFAULT_SETTINGS))
+            branches = client.branches()
+            users = client.users()
+            devices = client.devices()
+            self.ui_queue.put(("directory_loaded", {
+                "branches": branches,
+                "users": users,
+                "devices": devices,
+            }))
+        except Exception as exc:
+            self.ui_queue.put(("fingerprint_status", {
+                "ok": False,
+                "message": f"دریافت فهرست‌ها ناموفق بود: {exc}",
+            }))
+
+    def apply_directory_data(self, data: Dict[str, Any]) -> None:
+        self.directory_branches = list(data.get("branches") or [])
+        self.directory_users = list(data.get("users") or [])
+        self.directory_devices = list(data.get("devices") or [])
+
+        branch_values = [f"{item['title']}  |  ID {item['id']}" for item in self.directory_branches]
+        self.fp_branch_combo["values"] = branch_values
+
+        active_code = str(self.device_code_var.get() or "").strip()
+        active_device = next((item for item in self.directory_devices if item["device_code"] == active_code), None)
+        if active_device and active_device.get("branch_id"):
+            branch = next((item for item in self.directory_branches if int(item["id"]) == int(active_device["branch_id"])), None)
+            if branch:
+                self.fp_branch_var.set(f"{branch['title']}  |  ID {branch['id']}")
+        elif len(self.directory_branches) == 1:
+            item = self.directory_branches[0]
+            self.fp_branch_var.set(f"{item['title']}  |  ID {item['id']}")
+
+        self.apply_directory_filters()
+        self.fp_status_var.set(
+            f"{len(self.directory_users)} فرد، {len(self.directory_branches)} شعبه و {len(self.directory_devices)} دستگاه دریافت شد."
+        )
+
+    def _selected_branch(self) -> Optional[Dict[str, Any]]:
+        value = self.fp_branch_var.get()
+        for item in self.directory_branches:
+            if value == f"{item['title']}  |  ID {item['id']}":
+                return item
+        return None
+
+    def _selected_user(self) -> Optional[Dict[str, Any]]:
+        value = self.fp_user_var.get()
+        for item in self.filtered_users:
+            code = f" • {item['employee_code']}" if item.get("employee_code") else ""
+            if value == f"{item['name']}{code}  |  {item['username']}":
+                return item
+        return None
+
+    def _selected_directory_device(self) -> Optional[Dict[str, Any]]:
+        value = self.fp_device_var.get()
+        for item in self.filtered_devices:
+            if value == f"{item['title']} • {item['device_code']}  |  ID {item['id']}":
+                return item
+        return None
+
+    def apply_directory_filters(self) -> None:
+        branch = self._selected_branch()
+        branch_id = int(branch["id"]) if branch else None
+
+        def belongs(item: Dict[str, Any]) -> bool:
+            value = item.get("branch_id")
+            return branch_id is None or value in (None, "") or int(value) == branch_id
+
+        self.filtered_users = [item for item in self.directory_users if belongs(item)]
+        self.filtered_devices = [item for item in self.directory_devices if belongs(item)]
+
+        user_values = []
+        for item in self.filtered_users:
+            code = f" • {item['employee_code']}" if item.get("employee_code") else ""
+            user_values.append(f"{item['name']}{code}  |  {item['username']}")
+        self.fp_user_combo["values"] = user_values
+        if self.fp_user_var.get() not in user_values:
+            self.fp_user_var.set(user_values[0] if len(user_values) == 1 else "")
+
+        device_values = [
+            f"{item['title']} • {item['device_code']}  |  ID {item['id']}"
+            for item in self.filtered_devices
+        ]
+        self.fp_device_combo["values"] = device_values
+
+        active_code = str(self.device_code_var.get() or "").strip()
+        active = next((item for item in self.filtered_devices if item["device_code"] == active_code), None)
+        if active:
+            self.fp_device_var.set(f"{active['title']} • {active['device_code']}  |  ID {active['id']}")
+        elif self.fp_device_var.get() not in device_values:
+            self.fp_device_var.set(device_values[0] if len(device_values) == 1 else "")
+
+    def suggest_finger_id_async(self) -> None:
+        device = self._selected_directory_device()
+        if not device:
+            self.fp_status_var.set("ابتدا دستگاه را انتخاب کنید.")
+            return
+        self.fp_status_var.set("در حال پیدا کردن اولین کد آزاد...")
+        threading.Thread(target=self._suggest_finger_id_worker, args=(device,), daemon=True).start()
+
+    def _suggest_finger_id_worker(self, device: Dict[str, Any]) -> None:
+        try:
+            finger_id = self.db.local_next_finger_id(int(device["id"]))
+            self.ui_queue.put(("finger_id_suggested", int(finger_id)))
+        except Exception as exc:
+            self.ui_queue.put(("fingerprint_status", {
+                "ok": False,
+                "message": f"پیشنهاد کد آزاد ناموفق بود: {exc}",
+            }))
+
+    def start_direct_enrollment(self) -> None:
+        branch = self._selected_branch()
+        user = self._selected_user()
+        device = self._selected_directory_device()
+
+        if not user:
+            messagebox.showwarning("ثبت اثر انگشت", "یک فرد را انتخاب کنید.")
+            return
+        if not device:
+            messagebox.showwarning("ثبت اثر انگشت", "یک دستگاه را انتخاب کنید.")
+            return
+        if not self.engine.device:
+            messagebox.showwarning("ثبت اثر انگشت", "دستگاه فیزیکی به این کامپیوتر متصل نیست.")
+            return
+        if str(self.engine.device.device_code).strip() != str(device["device_code"]).strip():
+            messagebox.showwarning(
+                "ثبت اثر انگشت",
+                f"دستگاه متصل {self.engine.device.device_code} است، اما {device['device_code']} انتخاب شده.",
+            )
+            return
+
+        try:
+            finger_id = int(self.fp_finger_id_var.get().strip())
+            if finger_id <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showwarning("ثبت اثر انگشت", "کد اثر انگشت باید عددی بزرگ‌تر از صفر باشد.")
+            return
+
+        existing_slot = self.db.fingerprint_registration_for_slot(int(device["id"]), finger_id)
+        if existing_slot:
+            existing_username = str(existing_slot.get("username") or "")
+            if existing_username == str(user["username"]):
+                messagebox.showinfo(
+                    "ثبت اثر انگشت",
+                    "این کد اثر انگشت قبلاً برای همین username روی این دستگاه ثبت شده است.",
+                )
+            else:
+                messagebox.showwarning(
+                    "ثبت اثر انگشت",
+                    f"کد اثر انگشت {finger_id} قبلاً برای username دیگری روی این دستگاه استفاده شده است.",
+                )
+            return
+
+        payload = {
+            "branch_id": int(branch["id"]) if branch else device.get("branch_id"),
+            "username": str(user["username"]),
+            "user_name": str(user["name"]),
+            "device_id": int(device["id"]),
+            "device_code": str(device["device_code"]),
+            "finger_id": finger_id,
+        }
+        self.fp_status_var.set(f"در حال ثبت اثر انگشت برای {user['name']}...")
+        threading.Thread(target=self._direct_enrollment_worker, args=(payload,), daemon=True).start()
+
+    def _direct_enrollment_worker(self, payload: Dict[str, Any]) -> None:
+        self.ui_queue.put(("enroll_start", {
+            "employee_name": payload["user_name"],
+            "employee_id": None,
+            "finger_id": payload["finger_id"],
+            "device_code": payload["device_code"],
+            "timeout": 90,
+            "source": "windows_direct",
+        }))
+        try:
+            if not self.engine.device:
+                raise RuntimeError("دستگاه متصل نیست")
+            command = self.engine.serial_bridge.command_for_device("ENROLL_FINGER", {"finger_id": payload["finger_id"]})
+            lines = self.engine.serial_bridge.send_command(self.engine.device.port, command, timeout=90)
+            success = bool(lines) and any(line.startswith("OK,") for line in lines) and not any(line.startswith("ERR,") for line in lines)
+            if not success:
+                raise RuntimeError("سنسور پاسخ موفق نداد" if lines else "پاسخی از دستگاه دریافت نشد")
+
+            item = dict(payload)
+            item["registration_uuid"] = str(uuid.uuid4())
+            item["registered_at"] = local_now()
+            saved, reason = self.db.save_fingerprint_registration(item)
+            if not saved:
+                if reason == "slot_conflict":
+                    raise RuntimeError("این کد اثر انگشت قبلاً برای فرد دیگری روی همین دستگاه ثبت شده است")
+                raise RuntimeError("ذخیره محلی ثبت اثر انگشت ناموفق بود")
+
+            api_payload = {
+                "username": item["username"],
+                "device_id": item["device_id"],
+                "device_code": item["device_code"],
+                "finger_id": item["finger_id"],
+            }
+
+            server_ok = False
+            server_message = "در صف ارسال به سرور"
+            try:
+                response = self.engine.directory_client.register_fingerprint(api_payload)
+                self.db.mark_fingerprint_registration_synced(item["registration_uuid"], response)
+                server_ok = True
+                server_message = "در سرور نیز ثبت شد"
+            except Exception as exc:
+                self.db.mark_fingerprint_registration_failed(item["registration_uuid"], str(exc))
+                server_message = f"روی دستگاه ثبت شد؛ ارسال به سرور در صف تکرار است: {exc}"
+
+            self.ui_queue.put(("enroll_result", {
+                "ok": True,
+                "employee_name": item["user_name"],
+                "employee_id": None,
+                "finger_id": item["finger_id"],
+                "response": lines,
+                "error_message": None,
+            }))
+            self.ui_queue.put(("fingerprint_status", {
+                "ok": server_ok,
+                "message": f"ثبت اثر انگشت {item['user_name']} موفق بود؛ {server_message}.",
+            }))
+        except Exception as exc:
+            self.ui_queue.put(("enroll_result", {
+                "ok": False,
+                "employee_name": payload.get("user_name"),
+                "employee_id": None,
+                "finger_id": payload.get("finger_id"),
+                "response": [],
+                "error_message": str(exc),
+            }))
+            self.ui_queue.put(("fingerprint_status", {
+                "ok": False,
+                "message": f"ثبت اثر انگشت ناموفق بود: {exc}",
+            }))
+
 
     def build_device(self, parent: tk.Frame) -> None:
         self.section_title(parent, "دستگاه متصل", "برنامه در هر لحظه با یک دستگاه کار می‌کند و کد دستگاه را از سخت‌افزار می‌خواند.")
@@ -1295,6 +1919,14 @@ class HozoorApp(tk.Tk):
                     self.show_enrollment_window(data or {})
                 elif event == "enroll_result":
                     self.finish_enrollment_window(data or {})
+                elif event == "directory_loaded":
+                    self.apply_directory_data(data or {})
+                elif event == "finger_id_suggested":
+                    self.fp_finger_id_var.set(str(data))
+                    self.fp_status_var.set(f"کد آزاد پیشنهادی: {data}")
+                elif event == "fingerprint_status":
+                    payload = data or {}
+                    self.fp_status_var.set(str(payload.get("message") or ""))
                 elif event == "refresh":
                     self.refresh_ui()
         except queue.Empty:
@@ -1331,7 +1963,7 @@ class HozoorApp(tk.Tk):
             pass
 
         tk.Label(win, text="ثبت اثر انگشت", bg=C_SURFACE, fg=C_RED, font=self.f_title).pack(anchor="e", padx=24, pady=(24, 6))
-        tk.Label(win, text="درخواست از سمت سرور دریافت شد", bg=C_SURFACE, fg=C_MUTED, font=self.f_normal).pack(anchor="e", padx=24)
+        tk.Label(win, text="عملیات ثبت اثر انگشت در حال اجراست", bg=C_SURFACE, fg=C_MUTED, font=self.f_normal).pack(anchor="e", padx=24)
 
         info = tk.Frame(win, bg="#F8F8F8", highlightthickness=1, highlightbackground=C_LINE)
         info.pack(fill="x", padx=24, pady=16)
